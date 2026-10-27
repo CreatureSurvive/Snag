@@ -8,3 +8,5 @@ DerivedData/
 Package.resolved
 Example/*.xcodeproj
 Example/build
+Server/.env.local
+Server/.env

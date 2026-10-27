@@ -1,0 +1,37 @@
+# docker compose up -d   →   http://localhost:8080 (dashboard), POST /api/v1/reports (apps)
+services:
+  snag:
+    image: ghcr.io/creaturesurvive/snag-server:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - snag-data:/data
+    environment:
+      # Required: one or more ingest keys (app:key, comma-separated). Generate with: openssl rand -hex 24
+      SNAG_API_KEYS: ${SNAG_API_KEYS:?set SNAG_API_KEYS in .env}
+      # Dashboard login (user "admin"). Leave unset to disable the dashboard.
+      SNAG_ADMIN_PASSWORD: ${SNAG_ADMIN_PASSWORD:-}
+      # The URL people use to reach this server; used for links in forwarded reports.
+      SNAG_PUBLIC_URL: ${SNAG_PUBLIC_URL:-}
+      # Set to true behind a reverse proxy so rate limiting sees real client IPs.
+      SNAG_TRUST_PROXY: ${SNAG_TRUST_PROXY:-false}
+      SNAG_RETENTION_DAYS: ${SNAG_RETENTION_DAYS:-0}
+      # Forwarding (all optional)
+      SNAG_GITHUB_TOKEN: ${SNAG_GITHUB_TOKEN:-}
+      SNAG_GITHUB_REPO: ${SNAG_GITHUB_REPO:-}
+      SNAG_GITHUB_ATTACHMENT_BRANCH: ${SNAG_GITHUB_ATTACHMENT_BRANCH:-}
+      SNAG_DISCORD_WEBHOOK: ${SNAG_DISCORD_WEBHOOK:-}
+      SNAG_SLACK_WEBHOOK: ${SNAG_SLACK_WEBHOOK:-}
+      SNAG_WEBHOOK_URL: ${SNAG_WEBHOOK_URL:-}
+      SNAG_WEBHOOK_SECRET: ${SNAG_WEBHOOK_SECRET:-}
+      SNAG_SMTP_HOST: ${SNAG_SMTP_HOST:-}
+      SNAG_SMTP_PORT: ${SNAG_SMTP_PORT:-587}
+      SNAG_SMTP_USERNAME: ${SNAG_SMTP_USERNAME:-}
+      SNAG_SMTP_PASSWORD: ${SNAG_SMTP_PASSWORD:-}
+      SNAG_SMTP_FROM: ${SNAG_SMTP_FROM:-}
+      SNAG_SMTP_TO: ${SNAG_SMTP_TO:-}
+
+volumes:
+  snag-data:
