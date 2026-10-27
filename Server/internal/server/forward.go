@@ -121,6 +121,8 @@ type Dispatcher struct {
 	MaxAttempts int
 	// Build makes a project's forwarders; tests replace it.
 	Build func(p *Project) []Forwarder
+	// OnDelivered runs after a successful forward.
+	OnDelivered func(rec *Record, forwarder, url string)
 }
 
 func NewDispatcher(store *Store, projects *ProjectStore, cfg Config, reportURL func(string) string, logger *slog.Logger) *Dispatcher {
@@ -311,6 +313,9 @@ func (d *Dispatcher) Process(ctx context.Context, id string) {
 				s.NextAttempt = time.Now().Add(d.Backoff(s.Attempts))
 			}
 		})
+		if ferr == nil && d.OnDelivered != nil {
+			d.OnDelivered(rec, name, url)
+		}
 		if ferr != nil {
 			d.log.Warn("forward failed", "id", id, "to", name, "err", ferr)
 		} else {
@@ -406,6 +411,11 @@ func (g *GitHubForwarder) Forward(ctx context.Context, rec *Record, open FileOpe
 	labels := append([]string{}, g.cfg.Labels...)
 	if rec.Kind != "" && !contains(labels, rec.Kind) {
 		labels = append(labels, rec.Kind)
+	}
+	for _, tag := range rec.Tags {
+		if tag = normalizeLabel(tag); tag != "" && !contains(labels, tag) {
+			labels = append(labels, tag)
+		}
 	}
 	body, err := g.api(ctx, "POST", repo+"/issues", map[string]any{
 		"title":  truncate(reportTitle(rec), 250),

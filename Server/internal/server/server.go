@@ -31,6 +31,7 @@ type Server struct {
 	issues    *IssueStore
 	forwarder *Dispatcher
 	notifier  *Notifier
+	github    *GitHubSync
 	log       *slog.Logger
 	limiter   *rateLimiter
 	csrfKey   []byte
@@ -68,6 +69,12 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	}
 	s.forwarder = NewDispatcher(store, projects, cfg, s.reportURL, logger)
 	s.notifier = NewNotifier(logger, cfg.NotifyPerHour)
+	s.github = NewGitHubSync(issues, projects, cfg, logger)
+	s.forwarder.OnDelivered = func(rec *Record, forwarder, url string) {
+		if forwarder == "github" {
+			s.github.Link(rec.Project, rec.Issue, url)
+		}
+	}
 	if err := s.migrate(); err != nil {
 		return nil, fmt.Errorf("migrating reports: %w", err)
 	}
@@ -130,6 +137,7 @@ func (s *Server) Store() *Store           { return s.store }
 func (s *Server) Projects() *ProjectStore { return s.projects }
 func (s *Server) Issues() *IssueStore     { return s.issues }
 func (s *Server) Notifier() *Notifier     { return s.notifier }
+func (s *Server) GitHub() *GitHubSync     { return s.github }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -145,6 +153,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reports", s.handleIngest)
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
+	s.mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
 	s.mux.HandleFunc("GET /api/v1/followup/{id}", s.handleFollowUp)
 	s.mux.HandleFunc("POST /api/v1/followup/{id}/messages", s.handleFollowUpReply)
 	s.mux.HandleFunc("GET /api/v1/projects", s.admin(s.handleAPIProjects))
@@ -383,6 +392,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.forwarder.Enqueue(stored.ID)
 	}
 	s.notifier.Notify(project, stored.Kind, alertFor(project, stored, filed, s.issueURL(project.Slug, stored.Issue)))
+	if filed.Regressed {
+		s.github.Push(project.Slug, issue.Number, GitHubChange{Status: true, AddLabels: []string{"regression"},
+			Comment: fmt.Sprintf("Regressed: reported again in %s.", orUnknown(reportVersion(stored)))})
+	}
 	resp := s.ingestResponse(stored)
 	resp["followUp"] = map[string]string{"token": readerToken, "path": "api/v1/followup/" + stored.ID}
 	writeJSONResponse(w, http.StatusCreated, resp)
@@ -661,4 +674,44 @@ func (l *rateLimiter) allow(key string) bool {
 	}
 	l.hits[key] = append(times, now)
 	return true
+}
+
+func orUnknown(v string) string {
+	if v == "" {
+		return "an unknown version"
+	}
+	return v
+}
+
+// pushDiff mirrors what changed between two versions of an issue to GitHub.
+func (s *Server) pushDiff(before, after *Issue, comment string) {
+	if after.GitHub == nil {
+		return
+	}
+	change := GitHubChange{Comment: comment}
+	if IsOpenStatus(before.Status) != IsOpenStatus(after.Status) || (before.Status != after.Status && (before.Status == IssueWontFix || after.Status == IssueWontFix)) {
+		change.Status = true
+	}
+	for _, l := range after.Labels {
+		if !contains(before.Labels, l) {
+			change.AddLabels = append(change.AddLabels, l)
+		}
+	}
+	for _, l := range before.Labels {
+		if !contains(after.Labels, l) {
+			change.RemoveLabels = append(change.RemoveLabels, l)
+		}
+	}
+	if before.Priority != after.Priority {
+		if l := githubPriorityLabel(after.Priority); l != "" {
+			change.AddLabels = append(change.AddLabels, l)
+		}
+		if l := githubPriorityLabel(before.Priority); l != "" {
+			change.RemoveLabels = append(change.RemoveLabels, l)
+		}
+	}
+	if after.FixedIn != "" && after.FixedIn != before.FixedIn && comment == "" {
+		change.Comment = "Fixed in " + after.FixedIn + "."
+	}
+	s.github.Push(after.Project, after.Number, change)
 }

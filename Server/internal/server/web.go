@@ -254,6 +254,7 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		s.pushMerged(p.Slug, into, numbers)
 		http.Redirect(w, r, issuePath(p.Slug, into), http.StatusSeeOther)
 		return
 	case action == "delete":
@@ -266,7 +267,8 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 			value = r.FormValue("label")
 		}
 		for _, n := range numbers {
-			_, err := s.issues.Update(p.Slug, n, func(i *Issue) error {
+			original, _ := s.issues.Get(p.Slug, n)
+			updated, err := s.issues.Update(p.Slug, n, func(i *Issue) error {
 				switch kind {
 				case "status":
 					return SetStatus(i, value)
@@ -284,9 +286,29 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			if err == nil && original != nil {
+				s.pushDiff(original, updated, "")
+			}
 		}
 	}
 	s.back(w, r, fallback)
+}
+
+// pushMerged closes the GitHub issues of merged-away issues as duplicates.
+func (s *Server) pushMerged(project string, into int, from []int) {
+	target, err := s.issues.Get(project, into)
+	if err != nil {
+		return
+	}
+	ref := fmt.Sprintf("Snag issue #%d", into)
+	if target.GitHub != nil {
+		ref = target.GitHub.URL
+	}
+	for _, n := range from {
+		if n != into {
+			s.github.Push(project, n, GitHubChange{Status: true, Comment: "Duplicate of " + ref + " (merged in Snag)."})
+		}
+	}
 }
 
 // MARK: Issue page
@@ -370,6 +392,7 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	before := issue.Priority
+	original := issue
 	updated, err := s.issues.Update(p.Slug, issue.Number, func(i *Issue) error {
 		if v := r.FormValue("status"); v != "" {
 			if err := SetStatus(i, v); err != nil {
@@ -401,6 +424,7 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.pushDiff(original, updated, "")
 	if PriorityRank(updated.Priority) >= PriorityRank("high") && PriorityRank(updated.Priority) > PriorityRank(before) {
 		s.notifier.Notify(p, updated.Kind, Alert{
 			Event: EventPriority, Title: fmt.Sprintf("%s #%d is %s", p.Name, updated.Number, updated.Priority),
@@ -445,6 +469,7 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		s.pushMerged(p.Slug, into, []int{issue.Number})
 		http.Redirect(w, r, issuePath(p.Slug, into), http.StatusSeeOther)
 		return
 	}
@@ -457,6 +482,7 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.pushMerged(p.Slug, issue.Number, []int{from})
 	http.Redirect(w, r, issuePath(p.Slug, issue.Number), http.StatusSeeOther)
 }
 
@@ -686,7 +712,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, p *Project, newKey, flash
 	s.render(w, "settings.html", map[string]any{
 		"P": p, "GH": gh, "WH": wh, "NewKey": newKey, "Flash": flash,
 		"HasServerToken": s.cfg.GitHubToken != "", "HasSMTP": s.cfg.SMTP != nil,
-		"Ingest": s.cfg.PublicURL, "PerHour": s.cfg.NotifyPerHour,
+		"Ingest": s.cfg.PublicURL, "PerHour": s.cfg.NotifyPerHour, "HasWebhook": s.cfg.GitHubWebhookSecret != "",
 	})
 }
 

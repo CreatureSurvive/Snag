@@ -43,6 +43,9 @@
     <label>Labels <input name="githubLabels" value="{{join .GH.Labels ", "}}" placeholder="snag, bug"></label>
     <label>Screenshot branch <input name="githubBranch" value="{{.GH.AttachmentBranch}}" placeholder="snag-attachments (optional)"></label>
     <label>Token <input name="githubToken" type="password" autocomplete="off" placeholder="{{if .GH.Token}}•••• set for this project{{else if .HasServerToken}}using SNAG_GITHUB_TOKEN{{else}}fine-grained token with Issues: write{{end}}"></label>
+    <p class="hint">Forwarded issues stay in sync: status, labels and priority go both ways, and GitHub comments arrive as notes.
+      {{if .HasWebhook}}For instant updates, add a webhook on the repository: payload URL <code>{{if .Ingest}}{{.Ingest}}{{else}}https://your-server{{end}}/api/v1/github/webhook</code>, content type JSON, the secret from <code>SNAG_GITHUB_WEBHOOK_SECRET</code>, events “Issues” and “Issue comments”.
+      {{else}}Without a webhook (set <code>SNAG_GITHUB_WEBHOOK_SECRET</code> to enable one), Snag checks GitHub every 10 minutes.{{end}}</p>
   </fieldset>
   <fieldset>
     <legend>Chat</legend>

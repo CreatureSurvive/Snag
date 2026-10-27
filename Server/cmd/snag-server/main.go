@@ -57,6 +57,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go srv.Dispatcher().Run(ctx, 30*time.Second)
+	// GitHub sync: webhooks bring changes in immediately; polling catches anything missed (or
+	// everything, when GitHub can't reach this server).
+	go func() {
+		interval := 10 * time.Minute
+		if cfg.GitHubWebhookSecret != "" {
+			interval = time.Hour
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				srv.GitHub().Poll(ctx)
+			}
+		}
+	}()
 	if retention := cfg.Retention(); retention > 0 {
 		go func() {
 			ticker := time.NewTicker(6 * time.Hour)

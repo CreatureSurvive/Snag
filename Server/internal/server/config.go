@@ -27,7 +27,9 @@ type Config struct {
 	// GitHubToken is the default token for projects that forward to GitHub without their own.
 	GitHubToken  string
 	GitHubAPIURL string
-	SMTP         *SMTPConfig
+	// GitHubWebhookSecret enables /api/v1/github/webhook for two-way sync.
+	GitHubWebhookSecret string
+	SMTP                *SMTPConfig
 	// NotifyPerHour caps push notifications per project per hour.
 	NotifyPerHour int
 }
@@ -161,6 +163,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return cfg, err
 	}
 	cfg.GitHubAPIURL = strings.TrimRight(get("SNAG_GITHUB_API_URL", "https://api.github.com"), "/")
+	if cfg.GitHubWebhookSecret, err = secret("SNAG_GITHUB_WEBHOOK_SECRET"); err != nil {
+		return cfg, err
+	}
 	if repo := get("SNAG_GITHUB_REPO", ""); repo != "" {
 		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" {
 			return cfg, fmt.Errorf("SNAG_GITHUB_REPO must be owner/repo")

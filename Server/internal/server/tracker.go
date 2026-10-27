@@ -84,6 +84,8 @@ type Issue struct {
 	LastReportAt time.Time `json:"lastReportAt"`
 	MergedInto   int       `json:"mergedInto,omitempty"`
 	Notes        []Note    `json:"notes,omitempty"`
+	// GitHub links the issue a report was forwarded to, for two-way sync.
+	GitHub *GitHubLink `json:"github,omitempty"`
 	// Thread holds messages the reporters see in the app.
 	Thread   []ThreadMessage `json:"thread,omitempty"`
 	Activity []Event         `json:"activity,omitempty"`

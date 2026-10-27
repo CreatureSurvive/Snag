@@ -1,16 +1,23 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -923,5 +930,251 @@ func TestAPIThreadMessageNeedsJSON(t *testing.T) {
 	}
 	if issue, _ := srv.issues.Get("gelo", 1); len(issue.Thread) != 1 {
 		t.Fatal("message not stored")
+	}
+}
+
+// fakeGitHub is a tiny stateful GitHub for sync tests.
+type fakeGitHub struct {
+	mu       sync.Mutex
+	next     int
+	issues   map[int]*fakeIssue
+	comments map[int][]map[string]any
+	calls    []string
+}
+
+type fakeIssue struct {
+	State, Reason string
+	Labels        []string
+}
+
+func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
+	f := &fakeGitHub{next: 5, issues: map[int]*fakeIssue{}, comments: map[int][]map[string]any{}}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		var in map[string]any
+		_ = json.Unmarshal(body, &in)
+		f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+		m := regexp.MustCompile(`^/repos/me/app/issues(?:/(\d+))?(/labels(?:/(.+))?|/comments)?$`).FindStringSubmatch(r.URL.Path)
+		if m == nil {
+			w.WriteHeader(404)
+			return
+		}
+		n, _ := strconv.Atoi(m[1])
+		switch {
+		case r.Method == "POST" && m[1] == "":
+			num := f.next
+			f.next++
+			labels := []string{}
+			for _, l := range in["labels"].([]any) {
+				labels = append(labels, l.(string))
+			}
+			f.issues[num] = &fakeIssue{State: "open", Labels: labels}
+			w.WriteHeader(201)
+			fmt.Fprintf(w, `{"number":%d,"html_url":"https://github.com/me/app/issues/%d"}`, num, num)
+		case r.Method == "PATCH":
+			f.issues[n].State = in["state"].(string)
+			if reason, ok := in["state_reason"].(string); ok {
+				f.issues[n].Reason = reason
+			}
+			w.Write([]byte(`{}`))
+		case r.Method == "POST" && m[2] == "/labels":
+			for _, l := range in["labels"].([]any) {
+				if !contains(f.issues[n].Labels, l.(string)) {
+					f.issues[n].Labels = append(f.issues[n].Labels, l.(string))
+				}
+			}
+			w.Write([]byte(`[]`))
+		case r.Method == "DELETE":
+			label, _ := url.PathUnescape(m[3])
+			var keep []string
+			for _, l := range f.issues[n].Labels {
+				if l != label {
+					keep = append(keep, l)
+				}
+			}
+			f.issues[n].Labels = keep
+			w.Write([]byte(`[]`))
+		case r.Method == "POST" && m[2] == "/comments":
+			f.comments[n] = append(f.comments[n], map[string]any{"id": len(f.comments[n]) + 100, "body": in["body"], "user": map[string]any{"login": "snag-bot", "type": "User"}})
+			w.Write([]byte(`{}`))
+		case r.Method == "GET" && m[2] == "/comments":
+			data, _ := json.Marshal(f.comments[n])
+			w.Write(data)
+		case r.Method == "GET":
+			i := f.issues[n]
+			labels := []map[string]string{}
+			for _, l := range i.Labels {
+				labels = append(labels, map[string]string{"name": l})
+			}
+			data, _ := json.Marshal(map[string]any{"state": i.State, "state_reason": i.Reason, "labels": labels, "closed_by": map[string]string{"login": "dev"}})
+			w.Write(data)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return f, ts
+}
+
+func (f *fakeGitHub) issue(n int) fakeIssue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return *f.issues[n]
+}
+
+func githubServer(t *testing.T) (*Server, *fakeGitHub) {
+	gh, ts := newFakeGitHub(t)
+	cfg := withForwarding(testConfig(t), ProjectForwarding{GitHub: &ProjectGitHub{Repo: "me/app", Labels: []string{"snag"}}})
+	cfg.GitHubToken, cfg.GitHubAPIURL, cfg.GitHubWebhookSecret = "ghp_x", ts.URL, "hook-secret"
+	srv, _ := newTestServer(t, cfg)
+	post(t, srv, sampleUpload(id1), testKey)
+	srv.Dispatcher().Process(context.Background(), strings.ToLower(id1))
+	return srv, gh
+}
+
+func TestGitHubSyncPushes(t *testing.T) {
+	srv, gh := githubServer(t)
+	issue, _ := srv.issues.Get("gelo", 1)
+	if issue.GitHub == nil || issue.GitHub.Number != 5 || issue.GitHub.Repo != "me/app" {
+		t.Fatalf("not linked: %+v", issue.GitHub)
+	}
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"priority": {"high"}, "addLabel": {"ui"}})
+	srv.github.Wait()
+	if got := gh.issue(5).Labels; !contains(got, "priority: high") || !contains(got, "ui") {
+		t.Fatalf("labels on GitHub %v", got)
+	}
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"priority": {"urgent"}, "removeLabel": {"ui"}})
+	srv.github.Wait()
+	if got := gh.issue(5).Labels; contains(got, "priority: high") || !contains(got, "priority: urgent") || contains(got, "ui") {
+		t.Fatalf("labels after change %v", got)
+	}
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"resolved"}, "fixedIn": {"2.1"}})
+	srv.github.Wait()
+	if st := gh.issue(5); st.State != "closed" || st.Reason != "completed" {
+		t.Fatalf("not closed: %+v", st)
+	}
+	if len(gh.comments[5]) != 1 || !strings.Contains(gh.comments[5][0]["body"].(string), "Fixed in 2.1.") {
+		t.Fatalf("comments %v", gh.comments[5])
+	}
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"wontfix"}})
+	srv.github.Wait()
+	if st := gh.issue(5); st.Reason != "not_planned" {
+		t.Fatalf("won't fix: %+v", st)
+	}
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"triaged"}})
+	srv.github.Wait()
+	if st := gh.issue(5); st.State != "open" {
+		t.Fatalf("not reopened: %+v", st)
+	}
+	// Polling sees nothing new: everything on GitHub came from Snag.
+	before, _ := srv.issues.Get("gelo", 1)
+	srv.github.Poll(context.Background())
+	after, _ := srv.issues.Get("gelo", 1)
+	if fmt.Sprint(before.Labels) != fmt.Sprint(after.Labels) || before.Priority != after.Priority || len(after.Notes) != 0 {
+		t.Fatalf("poll imported our own changes: %v → %v, notes %d", before.Labels, after.Labels, len(after.Notes))
+	}
+}
+
+func signedWebhook(t *testing.T, srv *Server, event string, payload map[string]any, secret string) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(payload)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	req := httptest.NewRequest("POST", "/api/v1/github/webhook", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", event)
+	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestGitHubWebhook(t *testing.T) {
+	srv, _ := githubServer(t)
+	repo := map[string]any{"full_name": "me/app"}
+	labels := func(names ...string) []map[string]string {
+		out := []map[string]string{}
+		for _, n := range names {
+			out = append(out, map[string]string{"name": n})
+		}
+		return out
+	}
+	if rr := signedWebhook(t, srv, "issues", map[string]any{"action": "closed"}, "wrong"); rr.Code != 401 {
+		t.Fatalf("bad signature: %d", rr.Code)
+	}
+	// GitHub's initial labels (from Snag) aren't changes.
+	signedWebhook(t, srv, "issues", map[string]any{"action": "labeled", "repository": repo,
+		"issue": map[string]any{"number": 5, "state": "open", "labels": labels("snag", "bug", "beta")}}, "hook-secret")
+	signedWebhook(t, srv, "issues", map[string]any{"action": "labeled", "repository": repo,
+		"issue": map[string]any{"number": 5, "state": "open", "labels": labels("snag", "bug", "beta", "needs-repro", "priority: medium")}}, "hook-secret")
+	issue, _ := srv.issues.Get("gelo", 1)
+	if !contains(issue.Labels, "needs-repro") || contains(issue.Labels, "snag") || issue.Priority != "medium" {
+		t.Fatalf("labeled: %v %q", issue.Labels, issue.Priority)
+	}
+	signedWebhook(t, srv, "issues", map[string]any{"action": "unlabeled", "repository": repo,
+		"issue": map[string]any{"number": 5, "state": "open", "labels": labels("snag", "bug", "needs-repro", "priority: medium")}}, "hook-secret")
+	if issue, _ = srv.issues.Get("gelo", 1); contains(issue.Labels, "beta") || !contains(issue.Labels, "needs-repro") {
+		t.Fatalf("unlabeled: %v", issue.Labels)
+	}
+	signedWebhook(t, srv, "issues", map[string]any{"action": "closed", "repository": repo, "sender": map[string]any{"login": "dev"},
+		"issue": map[string]any{"number": 5, "state": "closed", "state_reason": "completed"}}, "hook-secret")
+	if issue, _ = srv.issues.Get("gelo", 1); issue.Status != IssueResolved {
+		t.Fatalf("closed: %s", issue.Status)
+	}
+	if last := issue.Activity[len(issue.Activity)-1]; !strings.Contains(last.Text, "Closed on GitHub by @dev") {
+		t.Fatalf("activity %+v", last)
+	}
+	signedWebhook(t, srv, "issues", map[string]any{"action": "reopened", "repository": repo,
+		"issue": map[string]any{"number": 5, "state": "open"}}, "hook-secret")
+	if issue, _ = srv.issues.Get("gelo", 1); issue.Status != IssueTriaged {
+		t.Fatalf("reopened: %s", issue.Status)
+	}
+	comment := func(id int, body, user, kind string) {
+		signedWebhook(t, srv, "issue_comment", map[string]any{"action": "created", "repository": repo,
+			"issue": map[string]any{"number": 5}, "comment": map[string]any{"id": id, "body": body, "user": map[string]any{"login": user, "type": kind}}}, "hook-secret")
+	}
+	comment(1, "Can't repro on 2.1", "dev", "User")
+	comment(1, "Can't repro on 2.1", "dev", "User") // redelivery
+	comment(2, "beep", "ci", "Bot")
+	comment(3, snagCommentMarker+"\nFixed in 2.1.", "snag", "User")
+	if issue, _ = srv.issues.Get("gelo", 1); len(issue.Notes) != 1 || !strings.Contains(issue.Notes[0].Text, "GitHub comment by @dev:\nCan't repro") {
+		t.Fatalf("notes %+v", issue.Notes)
+	}
+	// Unlinked issues and pings are fine.
+	if rr := signedWebhook(t, srv, "ping", map[string]any{}, "hook-secret"); rr.Code != 200 {
+		t.Fatal("ping")
+	}
+	if rr := signedWebhook(t, srv, "issues", map[string]any{"action": "closed", "repository": repo, "issue": map[string]any{"number": 99}}, "hook-secret"); rr.Code != 200 {
+		t.Fatal("unlinked")
+	}
+}
+
+func TestGitHubPollAndMerge(t *testing.T) {
+	srv, gh := githubServer(t)
+	// Changes made directly on GitHub.
+	gh.mu.Lock()
+	gh.issues[5].State, gh.issues[5].Reason = "closed", "not_planned"
+	gh.issues[5].Labels = append(gh.issues[5].Labels, "wontfix-reason")
+	gh.comments[5] = append(gh.comments[5], map[string]any{"id": 7, "body": "Working as intended", "user": map[string]any{"login": "dev", "type": "User"}})
+	gh.mu.Unlock()
+	srv.github.Poll(context.Background())
+	issue, _ := srv.issues.Get("gelo", 1)
+	if issue.Status != IssueWontFix || !contains(issue.Labels, "wontfix-reason") || len(issue.Notes) != 1 {
+		t.Fatalf("poll: %s %v %d notes", issue.Status, issue.Labels, len(issue.Notes))
+	}
+	srv.github.Poll(context.Background())
+	if issue, _ = srv.issues.Get("gelo", 1); len(issue.Notes) != 1 {
+		t.Fatal("comment imported twice")
+	}
+	// Merging closes the duplicate's GitHub issue, pointing at the target.
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"new"}})
+	post(t, srv, uploadWith(ids(1)[0], "Another", "x"), testKey)
+	srv.Dispatcher().Process(context.Background(), ids(1)[0])
+	srv.github.Wait()
+	adminPost(t, srv, "/p/gelo/bulk", url.Values{"action": {"merge"}, "issue": {"1", "2"}})
+	srv.github.Wait()
+	if st := gh.issue(6); st.State != "closed" || st.Reason != "not_planned" {
+		t.Fatalf("duplicate not closed on GitHub: %+v", st)
+	}
+	if body := gh.comments[6][len(gh.comments[6])-1]["body"].(string); !strings.Contains(body, "Duplicate of https://github.com/me/app/issues/5") {
+		t.Fatalf("merge comment %q", body)
 	}
 }

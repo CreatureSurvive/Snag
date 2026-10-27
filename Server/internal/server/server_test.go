@@ -363,7 +363,7 @@ func TestGitHubForwarding(t *testing.T) {
 			t.Errorf("issue body missing %q:\n%s", want, body)
 		}
 	}
-	if fmt.Sprint(issue["labels"]) != "[snag bug]" {
+	if fmt.Sprint(issue["labels"]) != "[snag bug beta]" {
 		t.Fatalf("labels %v", issue["labels"])
 	}
 	if reqs[0].headers.Get("Authorization") != "Bearer ghp_x" {

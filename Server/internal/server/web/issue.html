@@ -153,6 +153,15 @@ Thanks for reporting this. </textarea></label>
     <button type="submit" class="primary">Save</button>
   </form>
 
+  {{with .I.GitHub}}
+  <div class="panel">
+    <h3>GitHub</h3>
+    <p><a href="{{.URL}}" rel="noreferrer">{{.Repo}}#{{.Number}}</a> · {{if eq .State "closed"}}closed{{else}}open{{end}}</p>
+    <p class="muted">Status, labels and priority sync both ways{{if not .SyncedAt.IsZero}} · synced {{ago .SyncedAt}}{{end}}.</p>
+    {{with .LastError}}<p class="flash error">Last sync failed: {{.}}</p>{{end}}
+  </div>
+  {{end}}
+
   <form class="panel form" id="thread" method="post" action="{{$self}}/thread">
     <h3>Message all reporters</h3>
     <input type="hidden" name="csrf" value="{{$csrf}}">
