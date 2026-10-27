@@ -28,6 +28,8 @@ type Config struct {
 	GitHubToken  string
 	GitHubAPIURL string
 	SMTP         *SMTPConfig
+	// NotifyPerHour caps push notifications per project per hour.
+	NotifyPerHour int
 }
 
 // GitHubConfig is a resolved GitHub destination for one project.
@@ -204,8 +206,32 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		cfg.SMTP = smtp
 		defaults.Email = smtp.To
 	}
+	var notify *NotifyConfig
+	ntfy, err := secret("SNAG_NTFY_URL")
+	if err != nil {
+		return cfg, err
+	}
+	ntfyToken, err := secret("SNAG_NTFY_TOKEN")
+	if err != nil {
+		return cfg, err
+	}
+	poUser, err := secret("SNAG_PUSHOVER_USER")
+	if err != nil {
+		return cfg, err
+	}
+	poToken, err := secret("SNAG_PUSHOVER_TOKEN")
+	if err != nil {
+		return cfg, err
+	}
+	if ntfy != "" || (poUser != "" && poToken != "") {
+		notify = &NotifyConfig{Ntfy: ntfy, NtfyToken: ntfyToken, PushoverUser: poUser, PushoverToken: poToken, OnNewIssue: true, OnRegression: true}
+	}
+	if cfg.NotifyPerHour, err = intVar("SNAG_NOTIFY_PER_HOUR", 30); err != nil {
+		return cfg, err
+	}
 	for _, slug := range envOrder {
 		seed := envSeeds[slug]
+		seed.Notify = notify
 		seed.Forwarding = defaults
 		cfg.Seeds = append(cfg.Seeds, *seed)
 	}

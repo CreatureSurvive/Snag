@@ -30,6 +30,7 @@ type Server struct {
 	projects  *ProjectStore
 	issues    *IssueStore
 	forwarder *Dispatcher
+	notifier  *Notifier
 	log       *slog.Logger
 	limiter   *rateLimiter
 	csrfKey   []byte
@@ -66,6 +67,7 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 		mux:      http.NewServeMux(),
 	}
 	s.forwarder = NewDispatcher(store, projects, cfg, s.reportURL, logger)
+	s.notifier = NewNotifier(logger, cfg.NotifyPerHour)
 	if err := s.migrate(); err != nil {
 		return nil, fmt.Errorf("migrating reports: %w", err)
 	}
@@ -127,6 +129,7 @@ func (s *Server) Dispatcher() *Dispatcher { return s.forwarder }
 func (s *Server) Store() *Store           { return s.store }
 func (s *Server) Projects() *ProjectStore { return s.projects }
 func (s *Server) Issues() *IssueStore     { return s.issues }
+func (s *Server) Notifier() *Notifier     { return s.notifier }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -156,6 +159,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /p/{slug}/settings", s.admin(s.project(s.handleSettings)))
 	s.mux.HandleFunc("POST /p/{slug}/settings", s.admin(s.csrf(s.project(s.handleSaveSettings))))
 	s.mux.HandleFunc("POST /p/{slug}/keys", s.admin(s.csrf(s.project(s.handleCreateKey))))
+	s.mux.HandleFunc("POST /p/{slug}/notify/test", s.admin(s.csrf(s.project(s.handleTestNotification))))
 	s.mux.HandleFunc("POST /p/{slug}/keys/{id}/revoke", s.admin(s.csrf(s.project(s.handleRevokeKey))))
 	s.mux.HandleFunc("POST /p/{slug}/delete", s.admin(s.csrf(s.project(s.handleDeleteProject))))
 	s.mux.HandleFunc("GET /p/{slug}/issues/{n}", s.admin(s.project(s.handleIssue)))
@@ -365,6 +369,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		if len(stored.Forwarding) > 0 {
 			s.forwarder.Enqueue(stored.ID)
 		}
+		s.notifier.Notify(project, stored.Kind, alertFor(project, stored, filed, s.issueURL(project.Slug, stored.Issue)))
 	}
 	writeJSONResponse(w, status, s.ingestResponse(stored))
 }

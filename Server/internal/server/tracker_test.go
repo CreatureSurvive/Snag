@@ -703,3 +703,101 @@ func TestOldFingerprintsAreUpgraded(t *testing.T) {
 		t.Fatal("identical report on a new version should group after the upgrade")
 	}
 }
+
+func TestNotifications(t *testing.T) {
+	ntfy, ntfyRequests := recorder(t, func(r recorded) (int, string) { return 200, "{}" })
+	push, pushRequests := recorder(t, func(r recorded) (int, string) { return 200, `{"status":1}` })
+	cfg := testConfig(t)
+	group := true
+	cfg.Seeds[0].GroupDuplicates = &group
+	cfg.Seeds[0].Notify = &NotifyConfig{Ntfy: ntfy.URL + "/gelo-alerts", NtfyToken: "tk", PushoverUser: "u", PushoverToken: "p", OnNewIssue: true, OnRegression: true}
+	cfg.NotifyPerHour = 5
+	srv, _ := newTestServer(t, cfg)
+	srv.notifier.PushoverURL = push.URL
+	id := ids(12)
+
+	post(t, srv, uploadVersion(id[0], "Crash in player", "3.2"), testKey)
+	srv.notifier.Wait()
+	if len(ntfyRequests()) != 1 || len(pushRequests()) != 1 {
+		t.Fatalf("new issue: ntfy %d pushover %d", len(ntfyRequests()), len(pushRequests()))
+	}
+	n := ntfyRequests()[0]
+	if n.path != "/gelo-alerts" || n.headers.Get("Title") != "Gelo #1 · new bug · 3.2" || n.headers.Get("Authorization") != "Bearer tk" ||
+		n.headers.Get("Click") != "https://snag.example.com/p/gelo/issues/1" || !strings.Contains(string(n.body), "same words") {
+		t.Fatalf("ntfy request %+v %s", n.headers, n.body)
+	}
+	form, _ := url.ParseQuery(string(pushRequests()[0].body))
+	if form.Get("user") != "u" || form.Get("token") != "p" || form.Get("url") != "https://snag.example.com/p/gelo/issues/1" {
+		t.Fatalf("pushover %v", form)
+	}
+
+	// A duplicate joining the open issue isn't announced unless OnReport is on.
+	post(t, srv, uploadVersion(id[1], "Crash in player", "3.2"), testKey)
+	srv.notifier.Wait()
+	if len(ntfyRequests()) != 1 {
+		t.Fatal("duplicate alerted")
+	}
+	// A regression is, with high priority.
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"resolved"}, "fixedIn": {"3.3"}})
+	post(t, srv, uploadVersion(id[2], "Crash in player", "3.3"), testKey)
+	srv.notifier.Wait()
+	last := ntfyRequests()[len(ntfyRequests())-1]
+	if !strings.Contains(last.headers.Get("Title"), "regressed") || last.headers.Get("Priority") != "high" {
+		t.Fatalf("regression alert %+v", last.headers)
+	}
+	// Priority alerts are opt-in.
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"priority": {"urgent"}})
+	srv.notifier.Wait()
+	before := len(ntfyRequests())
+	_, _ = srv.projects.Update("gelo", func(p *Project) error { p.Notify.OnPriority = true; return nil })
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"priority": {"low"}})
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"priority": {"urgent"}})
+	srv.notifier.Wait()
+	if got := len(ntfyRequests()); got != before+1 || ntfyRequests()[got-1].headers.Get("Priority") != "urgent" {
+		t.Fatalf("priority alerts %d → %d", before, got)
+	}
+	// Kind filter.
+	_, _ = srv.projects.Update("gelo", func(p *Project) error { p.Notify.Kinds = []string{"crash"}; return nil })
+	before = len(ntfyRequests())
+	post(t, srv, uploadWith(id[3], "Some bug", "x"), testKey)
+	srv.notifier.Wait()
+	if len(ntfyRequests()) != before {
+		t.Fatal("kind filter ignored")
+	}
+	// Hourly cap: 5 per hour; the rest are counted and mentioned later.
+	_, _ = srv.projects.Update("gelo", func(p *Project) error { p.Notify.Kinds = nil; return nil })
+	for i := 4; i < 12; i++ {
+		post(t, srv, uploadWith(id[i], fmt.Sprintf("Bug %d", i), "x"), testKey)
+	}
+	srv.notifier.Wait()
+	if got := len(ntfyRequests()); got != 5 {
+		t.Fatalf("cap: %d alerts", got)
+	}
+	// The settings test button bypasses the cap.
+	rr := adminPost(t, srv, "/p/gelo/notify/test", nil)
+	if !strings.Contains(rr.Header().Get("Location"), "Test+notification+sent") || len(ntfyRequests()) != 6 {
+		t.Fatalf("test: %s, %d", rr.Header().Get("Location"), len(ntfyRequests()))
+	}
+}
+
+func TestNotificationSettings(t *testing.T) {
+	srv, _ := newTestServer(t, testConfig(t))
+	adminPost(t, srv, "/p/gelo/settings", url.Values{"name": {"Gelo"}, "ntfy": {"ftp://nope"}})
+	if p, _ := srv.projects.Get("gelo"); p.Notify.Ntfy != "" {
+		t.Fatal("bad ntfy URL saved")
+	}
+	adminPost(t, srv, "/p/gelo/settings", url.Values{"name": {"Gelo"}, "ntfy": {"https://ntfy.sh/secret-topic"}, "onNewIssue": {"on"}, "notifyKinds": {"bug, crash"}})
+	p, _ := srv.projects.Get("gelo")
+	if p.Notify.Ntfy != "https://ntfy.sh/secret-topic" || !p.Notify.OnNewIssue || p.Notify.OnRegression || fmt.Sprint(p.Notify.Kinds) != "[bug crash]" {
+		t.Fatalf("notify %+v", p.Notify)
+	}
+	page := adminGet(srv, "/p/gelo/settings").Body.String()
+	if strings.Contains(page, "secret-topic") || !strings.Contains(page, "Send a test notification") {
+		t.Fatal("topic leaked or test button missing")
+	}
+	env := map[string]string{"SNAG_API_KEYS": "gelo:aaaaaaaaaaaaaaaaaaaa", "SNAG_NTFY_URL": "https://ntfy.sh/x"}
+	cfg, err := LoadConfig(func(k string) string { return env[k] })
+	if err != nil || cfg.Seeds[0].Notify == nil || !cfg.Seeds[0].Notify.OnRegression || cfg.NotifyPerHour != 30 {
+		t.Fatalf("env notify %+v %v", cfg.Seeds, err)
+	}
+}

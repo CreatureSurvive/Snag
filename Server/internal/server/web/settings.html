@@ -59,8 +59,32 @@
     <label>Recipients <input name="email" value="{{join .P.Forwarding.Email ", "}}" placeholder="dev@example.com" {{if not .HasSMTP}}disabled{{end}}></label>
     {{if not .HasSMTP}}<p class="hint">Needs <code>SNAG_SMTP_HOST</code> and <code>SNAG_SMTP_FROM</code> on the server.</p>{{end}}
   </fieldset>
+  <h2>Notifications</h2>
+  <p class="hint">Push alerts to your phone with <a href="https://ntfy.sh" rel="noreferrer">ntfy</a> (free, self-hostable) or Pushover. At most {{.PerHour}} per hour per project.</p>
+  <fieldset>
+    <legend>Channels</legend>
+    <label>ntfy topic URL <input name="ntfy" type="password" autocomplete="off" placeholder="{{if .P.Notify.Ntfy}}•••• set{{else}}https://ntfy.sh/a-hard-to-guess-topic{{end}}"></label>
+    <label>ntfy access token <input name="ntfyToken" type="password" autocomplete="off" placeholder="{{if .P.Notify.NtfyToken}}•••• set{{else}}optional, for protected topics{{end}}"></label>
+    <label>Pushover user key <input name="pushoverUser" type="password" autocomplete="off" placeholder="{{if .P.Notify.PushoverUser}}•••• set{{else}}optional{{end}}"></label>
+    <label>Pushover app token <input name="pushoverToken" type="password" autocomplete="off" placeholder="{{if .P.Notify.PushoverToken}}•••• set{{else}}optional{{end}}"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Alert me when</legend>
+    <label class="check"><input type="checkbox" name="onNewIssue" {{if .P.Notify.OnNewIssue}}checked{{end}}> A new issue is opened</label>
+    <label class="check"><input type="checkbox" name="onRegression" {{if .P.Notify.OnRegression}}checked{{end}}> A resolved issue regresses</label>
+    <label class="check"><input type="checkbox" name="onPriority" {{if .P.Notify.OnPriority}}checked{{end}}> An issue is set to high or urgent</label>
+    <label class="check"><input type="checkbox" name="onReport" {{if .P.Notify.OnReport}}checked{{end}}> Any new report, including duplicates</label>
+    <label>Only these kinds <input name="notifyKinds" value="{{join .P.Notify.Kinds ", "}}" placeholder="all kinds (or e.g. bug, crash)"></label>
+  </fieldset>
   <button type="submit" class="primary">Save settings</button>
 </form>
+
+{{if .P.Notify.Enabled}}
+<form class="panel" method="post" action="/p/{{.P.Slug}}/notify/test">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <button type="submit">Send a test notification</button>
+</form>
+{{end}}
 
 <form class="panel danger form" method="post" action="/p/{{.P.Slug}}/delete">
   <input type="hidden" name="csrf" value="{{.CSRF}}">

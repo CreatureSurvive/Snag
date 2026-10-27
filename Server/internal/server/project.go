@@ -25,6 +25,7 @@ type Project struct {
 	// Keys created in the dashboard. Only hashes are stored.
 	Keys       []APIKey          `json:"keys,omitempty"`
 	Forwarding ProjectForwarding `json:"forwarding"`
+	Notify     NotifyConfig      `json:"notify"`
 	// GroupDuplicates files a report with identical title and message (and the same app
 	// version) under the existing open issue instead of opening a new one.
 	GroupDuplicates bool `json:"groupDuplicates"`
@@ -114,6 +115,7 @@ type ProjectSeed struct {
 	Name            string            `json:"name"`
 	Keys            []string          `json:"keys"`
 	Forwarding      ProjectForwarding `json:"forwarding"`
+	Notify          *NotifyConfig     `json:"notify,omitempty"`
 	GroupDuplicates *bool             `json:"groupDuplicates,omitempty"`
 }
 
@@ -152,6 +154,9 @@ func OpenProjects(dataDir string, seeds []ProjectSeed) (*ProjectStore, error) {
 			p = &Project{Slug: slug, Name: name, CreatedAt: time.Now().UTC(), Forwarding: seed.Forwarding, FromConfig: true}
 			if seed.GroupDuplicates != nil {
 				p.GroupDuplicates = *seed.GroupDuplicates
+			}
+			if seed.Notify != nil {
+				p.Notify = *seed.Notify
 			}
 			ps.projects[slug] = p
 			changed = true

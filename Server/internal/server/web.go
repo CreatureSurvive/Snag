@@ -369,7 +369,8 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, err := s.issues.Update(p.Slug, issue.Number, func(i *Issue) error {
+	before := issue.Priority
+	updated, err := s.issues.Update(p.Slug, issue.Number, func(i *Issue) error {
 		if v := r.FormValue("status"); v != "" {
 			if err := SetStatus(i, v); err != nil {
 				return err
@@ -399,6 +400,12 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if PriorityRank(updated.Priority) >= PriorityRank("high") && PriorityRank(updated.Priority) > PriorityRank(before) {
+		s.notifier.Notify(p, updated.Kind, Alert{
+			Event: EventPriority, Title: fmt.Sprintf("%s #%d is %s", p.Name, updated.Number, updated.Priority),
+			Message: updated.Title, URL: s.issueURL(p.Slug, updated.Number), Urgent: updated.Priority == "urgent",
+		})
 	}
 	s.back(w, r, issuePath(p.Slug, issue.Number))
 }
@@ -679,7 +686,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, p *Project, newKey, flash
 	s.render(w, "settings.html", map[string]any{
 		"P": p, "GH": gh, "WH": wh, "NewKey": newKey, "Flash": flash,
 		"HasServerToken": s.cfg.GitHubToken != "", "HasSMTP": s.cfg.SMTP != nil,
-		"Ingest": s.cfg.PublicURL,
+		"Ingest": s.cfg.PublicURL, "PerHour": s.cfg.NotifyPerHour,
 	})
 }
 
@@ -735,6 +742,21 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 			f.Webhook = nil
 		}
 		f.Email = splitList(r.FormValue("email"))
+		n := &p.Notify
+		n.Ntfy = secretField(n.Ntfy, r.FormValue("ntfy"))
+		n.NtfyToken = secretField(n.NtfyToken, r.FormValue("ntfyToken"))
+		n.PushoverUser = secretField(n.PushoverUser, r.FormValue("pushoverUser"))
+		n.PushoverToken = secretField(n.PushoverToken, r.FormValue("pushoverToken"))
+		n.OnNewIssue = r.FormValue("onNewIssue") == "on"
+		n.OnRegression = r.FormValue("onRegression") == "on"
+		n.OnReport = r.FormValue("onReport") == "on"
+		n.OnPriority = r.FormValue("onPriority") == "on"
+		n.Kinds = splitList(r.FormValue("notifyKinds"))
+		if n.Ntfy != "" {
+			if u, err := url.Parse(n.Ntfy); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+				return errors.New("the ntfy topic must be a URL like https://ntfy.sh/your-topic")
+			}
+		}
 		for _, hook := range []string{f.Discord, f.Slack} {
 			if hook != "" && !strings.HasPrefix(hook, "https://") {
 				return errors.New("Discord and Slack webhooks must be https URLs")
@@ -759,6 +781,23 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ = s.projects.Get(p.Slug)
 	s.renderSettings(w, p, key, "")
+}
+
+func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
+	p := projectFrom(r)
+	if !p.Notify.Enabled() {
+		http.Redirect(w, r, "/p/"+p.Slug+"/settings?flash="+url.QueryEscape("Set up ntfy or Pushover first"), http.StatusSeeOther)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	err := s.notifier.Send(ctx, p.Notify, Alert{Event: EventTest, Title: p.Name + " · test notification",
+		Message: "Notifications from Snag are working.", URL: s.cfg.PublicURL + "/p/" + p.Slug})
+	flash := "Test notification sent"
+	if err != nil {
+		flash = "Test notification failed: " + err.Error()
+	}
+	http.Redirect(w, r, "/p/"+p.Slug+"/settings?flash="+url.QueryEscape(flash), http.StatusSeeOther)
 }
 
 func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
