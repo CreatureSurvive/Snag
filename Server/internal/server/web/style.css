@@ -188,3 +188,5 @@ details .context { margin-top: 8px; }
 .msg .message { padding: 8px 12px; }
 .msg-team { margin-left: auto; text-align: right; }
 .msg-team .message { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); text-align: left; }
+.kind-crash { color: #fff; background: var(--bug); }
+.kind-hang { color: #c2410c; background: color-mix(in srgb, #c2410c 14%, transparent); }

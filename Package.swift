@@ -12,6 +12,11 @@ let package = Package(
     products: [
         .library(name: "Snag", targets: ["Snag"]),
         .library(name: "SnagUI", targets: ["SnagUI"]),
+        .library(name: "SnagPostmortem", targets: ["SnagPostmortem"]),
+    ],
+    dependencies: [
+        // Only linked into apps that use the SnagPostmortem product.
+        .package(url: "https://github.com/CreatureSurvive/Postmortem", from: "1.0.2"),
     ],
     targets: [
         .target(
@@ -23,9 +28,15 @@ let package = Package(
             dependencies: ["Snag"],
             swiftSettings: [.enableUpcomingFeature("ExistentialAny")]
         ),
+        .target(
+            name: "SnagPostmortem",
+            dependencies: ["Snag", .product(name: "Postmortem", package: "Postmortem")],
+            swiftSettings: [.enableUpcomingFeature("ExistentialAny")]
+        ),
         .testTarget(
             name: "SnagTests",
-            dependencies: ["Snag", "SnagUI"]
+            dependencies: ["Snag", "SnagUI", "SnagPostmortem"],
+            resources: [.copy("Fixtures")]
         ),
     ],
     swiftLanguageModes: [.v6]

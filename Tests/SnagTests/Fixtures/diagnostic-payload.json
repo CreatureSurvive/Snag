@@ -1,0 +1,301 @@
+{
+  "timeStampBegin" : "2026-09-21 09:13:20",
+  "diskWriteExceptionDiagnostics" : [
+    {
+      "version" : "1.0.0",
+      "callStackTree" : {
+        "callStacks" : [
+          {
+            "threadAttributed" : true,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "9A0E4C3F-1B6B-3D6E-8A7B-2E3C4D5E6F70",
+                "offsetIntoBinaryTextSegment" : 123456,
+                "sampleCount" : 1,
+                "subFrames" : [
+                  {
+                    "binaryUUID" : "70B89F27-1634-3580-A695-57CDB41D7743",
+                    "offsetIntoBinaryTextSegment" : 5000,
+                    "sampleCount" : 1,
+                    "binaryName" : "Demo",
+                    "address" : 4295000000
+                  }
+                ],
+                "binaryName" : "libswiftCore.dylib",
+                "address" : 7000000000
+              }
+            ]
+          },
+          {
+            "threadAttributed" : false,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "11111111-2222-3333-4444-555555555555",
+                "offsetIntoBinaryTextSegment" : 777,
+                "sampleCount" : 3,
+                "binaryName" : "libsystem_kernel.dylib",
+                "address" : 7100000000
+              }
+            ]
+          }
+        ],
+        "callStackPerThread" : true
+      },
+      "diagnosticMetaData" : {
+        "appBuildVersion" : "42",
+        "isTestFlightApp" : true,
+        "regionFormat" : "US",
+        "appVersion" : "1.2.0",
+        "osVersion" : "iPhone OS 18.2 (22C152)",
+        "deviceType" : "iPhone16,1",
+        "bundleIdentifier" : "com.example.demo",
+        "pid" : 1234,
+        "writesCaused" : "2147483648 byte",
+        "platformArchitecture" : "arm64e",
+        "lowPowerModeEnabled" : false
+      }
+    }
+  ],
+  "timeStampEnd" : "2026-09-22 09:13:20",
+  "hangDiagnostics" : [
+    {
+      "callStackTree" : {
+        "callStacks" : [
+          {
+            "threadAttributed" : true,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "9A0E4C3F-1B6B-3D6E-8A7B-2E3C4D5E6F70",
+                "offsetIntoBinaryTextSegment" : 123456,
+                "sampleCount" : 1,
+                "subFrames" : [
+                  {
+                    "binaryUUID" : "70B89F27-1634-3580-A695-57CDB41D7743",
+                    "offsetIntoBinaryTextSegment" : 5000,
+                    "sampleCount" : 1,
+                    "binaryName" : "Demo",
+                    "address" : 4295000000
+                  }
+                ],
+                "binaryName" : "libswiftCore.dylib",
+                "address" : 7000000000
+              }
+            ]
+          },
+          {
+            "threadAttributed" : false,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "11111111-2222-3333-4444-555555555555",
+                "offsetIntoBinaryTextSegment" : 777,
+                "sampleCount" : 3,
+                "binaryName" : "libsystem_kernel.dylib",
+                "address" : 7100000000
+              }
+            ]
+          }
+        ],
+        "callStackPerThread" : true
+      },
+      "diagnosticMetaData" : {
+        "appBuildVersion" : "42",
+        "isTestFlightApp" : true,
+        "regionFormat" : "US",
+        "appVersion" : "1.2.0",
+        "osVersion" : "iPhone OS 18.2 (22C152)",
+        "deviceType" : "iPhone16,1",
+        "bundleIdentifier" : "com.example.demo",
+        "pid" : 1234,
+        "hangDuration" : "4 sec",
+        "platformArchitecture" : "arm64e",
+        "lowPowerModeEnabled" : false
+      },
+      "hangType" : "Main Runloop Hang",
+      "version" : "1.0.0"
+    }
+  ],
+  "crashDiagnostics" : [
+    {
+      "version" : "1.0.0",
+      "callStackTree" : {
+        "callStacks" : [
+          {
+            "threadAttributed" : true,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "9A0E4C3F-1B6B-3D6E-8A7B-2E3C4D5E6F70",
+                "offsetIntoBinaryTextSegment" : 123456,
+                "sampleCount" : 1,
+                "subFrames" : [
+                  {
+                    "binaryUUID" : "70B89F27-1634-3580-A695-57CDB41D7743",
+                    "offsetIntoBinaryTextSegment" : 5000,
+                    "sampleCount" : 1,
+                    "binaryName" : "Demo",
+                    "address" : 4295000000
+                  }
+                ],
+                "binaryName" : "libswiftCore.dylib",
+                "address" : 7000000000
+              }
+            ]
+          },
+          {
+            "threadAttributed" : false,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "11111111-2222-3333-4444-555555555555",
+                "offsetIntoBinaryTextSegment" : 777,
+                "sampleCount" : 3,
+                "binaryName" : "libsystem_kernel.dylib",
+                "address" : 7100000000
+              }
+            ]
+          }
+        ],
+        "callStackPerThread" : true
+      },
+      "diagnosticMetaData" : {
+        "platformArchitecture" : "arm64e",
+        "objectiveCexceptionReason" : {
+          "arguments" : [
+            "5",
+            "2"
+          ],
+          "exceptionType" : "NSException",
+          "formatString" : "*** -[__NSArrayM objectAtIndex:]: index %lu beyond bounds [0 .. %lu]",
+          "composedMessage" : "*** -[__NSArrayM objectAtIndex:]: index 5 beyond bounds [0 .. 2]",
+          "className" : "__NSArrayM",
+          "exceptionName" : "NSRangeException"
+        },
+        "terminationReason" : "Namespace SIGNAL, Code 5 Trace\/BPT trap: 5",
+        "exceptionType" : 6,
+        "appBuildVersion" : "42",
+        "isTestFlightApp" : true,
+        "osVersion" : "iPhone OS 18.2 (22C152)",
+        "bundleIdentifier" : "com.example.demo",
+        "deviceType" : "iPhone16,1",
+        "exceptionCode" : 1,
+        "virtualMemoryRegionInfo" : "0 is not in any region.",
+        "signal" : 5,
+        "regionFormat" : "US",
+        "appVersion" : "1.2.0",
+        "pid" : 1234,
+        "lowPowerModeEnabled" : false
+      }
+    }
+  ],
+  "cpuExceptionDiagnostics" : [
+    {
+      "version" : "1.0.0",
+      "callStackTree" : {
+        "callStacks" : [
+          {
+            "threadAttributed" : true,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "9A0E4C3F-1B6B-3D6E-8A7B-2E3C4D5E6F70",
+                "offsetIntoBinaryTextSegment" : 123456,
+                "sampleCount" : 1,
+                "subFrames" : [
+                  {
+                    "binaryUUID" : "70B89F27-1634-3580-A695-57CDB41D7743",
+                    "offsetIntoBinaryTextSegment" : 5000,
+                    "sampleCount" : 1,
+                    "binaryName" : "Demo",
+                    "address" : 4295000000
+                  }
+                ],
+                "binaryName" : "libswiftCore.dylib",
+                "address" : 7000000000
+              }
+            ]
+          },
+          {
+            "threadAttributed" : false,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "11111111-2222-3333-4444-555555555555",
+                "offsetIntoBinaryTextSegment" : 777,
+                "sampleCount" : 3,
+                "binaryName" : "libsystem_kernel.dylib",
+                "address" : 7100000000
+              }
+            ]
+          }
+        ],
+        "callStackPerThread" : true
+      },
+      "diagnosticMetaData" : {
+        "platformArchitecture" : "arm64e",
+        "lowPowerModeEnabled" : false,
+        "totalCPUTime" : "90 sec",
+        "appBuildVersion" : "42",
+        "isTestFlightApp" : true,
+        "osVersion" : "iPhone OS 18.2 (22C152)",
+        "bundleIdentifier" : "com.example.demo",
+        "deviceType" : "iPhone16,1",
+        "regionFormat" : "US",
+        "appVersion" : "1.2.0",
+        "pid" : 1234,
+        "totalSampledTime" : "180 sec"
+      }
+    }
+  ],
+  "appLaunchDiagnostics" : [
+    {
+      "version" : "1.0.0",
+      "callStackTree" : {
+        "callStacks" : [
+          {
+            "threadAttributed" : true,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "9A0E4C3F-1B6B-3D6E-8A7B-2E3C4D5E6F70",
+                "offsetIntoBinaryTextSegment" : 123456,
+                "sampleCount" : 1,
+                "subFrames" : [
+                  {
+                    "binaryUUID" : "70B89F27-1634-3580-A695-57CDB41D7743",
+                    "offsetIntoBinaryTextSegment" : 5000,
+                    "sampleCount" : 1,
+                    "binaryName" : "Demo",
+                    "address" : 4295000000
+                  }
+                ],
+                "binaryName" : "libswiftCore.dylib",
+                "address" : 7000000000
+              }
+            ]
+          },
+          {
+            "threadAttributed" : false,
+            "callStackRootFrames" : [
+              {
+                "binaryUUID" : "11111111-2222-3333-4444-555555555555",
+                "offsetIntoBinaryTextSegment" : 777,
+                "sampleCount" : 3,
+                "binaryName" : "libsystem_kernel.dylib",
+                "address" : 7100000000
+              }
+            ]
+          }
+        ],
+        "callStackPerThread" : true
+      },
+      "diagnosticMetaData" : {
+        "appBuildVersion" : "42",
+        "isTestFlightApp" : true,
+        "regionFormat" : "US",
+        "appVersion" : "1.2.0",
+        "osVersion" : "iPhone OS 18.2 (22C152)",
+        "deviceType" : "iPhone16,1",
+        "bundleIdentifier" : "com.example.demo",
+        "pid" : 1234,
+        "launchDuration" : "2500 ms",
+        "platformArchitecture" : "arm64e",
+        "lowPowerModeEnabled" : false
+      }
+    }
+  ]
+}
