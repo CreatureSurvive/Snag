@@ -37,6 +37,14 @@ func uploadWith(id, title, message string) upload {
 	return u
 }
 
+func uploadVersion(id, title, version string) upload {
+	u := uploadWith(id, title, "same words")
+	ctx := u.manifest["context"].(map[string]any)
+	app := ctx["app"].(map[string]any)
+	app["version"] = version
+	return u
+}
+
 func ids(n int) []string {
 	out := make([]string, n)
 	for i := range out {
@@ -236,11 +244,11 @@ func TestDuplicateGroupingForwardsOnce(t *testing.T) {
 	if rec, _ := store.Get(id[1]); rec.Issue != 1 || rec.Forwarding != nil {
 		t.Fatalf("duplicate %+v", rec)
 	}
-	// Grouping only targets open issues.
-	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"resolved"}})
-	post(t, srv, uploadWith("00000009-0000-4000-8000-000000000000", "Crash on launch", "It crashes"), testKey)
+	// Won't-fix issues don't collect new reports.
+	adminPost(t, srv, "/p/gelo/issues/2/update", url.Values{"status": {"wontfix"}})
+	post(t, srv, uploadWith("00000009-0000-4000-8000-000000000000", "Crash on launch", "Different words"), testKey)
 	if _, err := srv.issues.Get("gelo", 3); err != nil {
-		t.Fatal("a regression after resolving should open a new issue")
+		t.Fatal("a report matching a won't-fix issue should open a new one")
 	}
 	// Deleting a report keeps the issue; deleting the last one removes it.
 	adminPost(t, srv, "/p/gelo/reports/"+id[1]+"/delete", nil)
@@ -598,5 +606,100 @@ func TestRecordingsAreStoredAsVideo(t *testing.T) {
 	file := adminGet(srv, "/reports/"+rec.ID+"/files/"+video.Name)
 	if file.Header().Get("Content-Type") != "video/mp4" || !strings.HasPrefix(file.Header().Get("Content-Disposition"), "inline") {
 		t.Fatalf("served as %s %s", file.Header().Get("Content-Type"), file.Header().Get("Content-Disposition"))
+	}
+}
+
+func TestRegressions(t *testing.T) {
+	cfg := testConfig(t)
+	group := true
+	cfg.Seeds[0].GroupDuplicates = &group
+	srv, _ := newTestServer(t, cfg)
+	id := ids(5)
+	post(t, srv, uploadVersion(id[0], "Crash in player", "3.2"), testKey)
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"resolved"}, "fixedIn": {"3.3"}})
+
+	// Still on the old version: joins the resolved issue without reopening it.
+	post(t, srv, uploadVersion(id[1], "Crash in player", "3.2.1"), testKey)
+	issue, _ := srv.issues.Get("gelo", 1)
+	if issue.Status != IssueResolved || len(issue.Reports) != 2 || issue.Regressions != 0 {
+		t.Fatalf("old version reopened: %+v", issue)
+	}
+	// On the fixed version: a regression.
+	post(t, srv, uploadVersion(id[2], "Crash in player", "3.10"), testKey)
+	issue, _ = srv.issues.Get("gelo", 1)
+	if issue.Status != IssueNew || issue.Regressions != 1 || !contains(issue.Labels, "regression") {
+		t.Fatalf("not a regression: %+v", issue)
+	}
+	last := issue.Activity[len(issue.Activity)-1]
+	if last.Kind != "regression" || !strings.Contains(last.Text, "3.10 after the fix in 3.3") {
+		t.Fatalf("activity %+v", last)
+	}
+	if _, err := srv.issues.Get("gelo", 2); err == nil {
+		t.Fatal("regression should reuse the issue")
+	}
+	// Without a fixed-in version, any new report after resolving is a regression.
+	post(t, srv, uploadVersion(id[3], "Another bug", "3.10"), testKey)
+	adminPost(t, srv, "/p/gelo/issues/2/update", url.Values{"status": {"resolved"}})
+	post(t, srv, uploadVersion(id[4], "Another bug", "3.10"), testKey)
+	if i2, _ := srv.issues.Get("gelo", 2); i2.Regressions != 1 || i2.Status != IssueNew {
+		t.Fatalf("issue 2 %+v", i2)
+	}
+	// Filters and pages.
+	if body := adminGet(srv, "/p/gelo?regressed=1").Body.String(); !strings.Contains(body, "Crash in player") || !strings.Contains(body, "↺ regressed") {
+		t.Fatal("regression filter")
+	}
+	if body := adminGet(srv, "/p/gelo?status=all&version=3.3").Body.String(); !strings.Contains(body, "Crash in player") {
+		t.Fatal("fixed-in version filter")
+	}
+	page := adminGet(srv, "/p/gelo/releases")
+	body := page.Body.String()
+	if page.Code != 200 {
+		t.Fatalf("releases: %d %s", page.Code, body)
+	}
+	v310 := strings.Index(body, "<strong>3.10</strong>")
+	v33 := strings.Index(body, "<strong>3.3</strong>")
+	v32 := strings.Index(body, "<strong>3.2</strong>")
+	if v310 < 0 || v33 < 0 || v32 < 0 || !(v310 < v33 && v33 < v32) {
+		t.Fatalf("versions not listed newest first: %d %d %d", v310, v33, v32)
+	}
+	if !strings.Contains(body, "<rect") || strings.Contains(body, "style=") {
+		t.Fatal("chart should be SVG without inline styles (CSP)")
+	}
+}
+
+func TestCompareVersions(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"3.10", "3.9", 1}, {"3.2", "3.2.0", 0}, {"3.2.1", "3.2", 1}, {"v2", "2.0", 0},
+		{"2.0-beta", "2.0", -1}, {"2.0", "2.0-rc1", 1}, {"2.0-beta", "2.0-rc", -1}, {"1.0", "1.0.1", -1}, {"10", "9.9.9", 1}, {"", "1", -1},
+	}
+	for _, c := range cases {
+		if got := CompareVersions(c.a, c.b); got != c.want {
+			t.Errorf("%q vs %q: %d want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestOldFingerprintsAreUpgraded(t *testing.T) {
+	cfg := testConfig(t)
+	group := true
+	cfg.Seeds[0].GroupDuplicates = &group
+	srv, _ := newTestServer(t, cfg)
+	post(t, srv, uploadVersion(ids(1)[0], "Crash in player", "3.2"), testKey)
+	// Simulate an issue saved by the previous format (which included the version).
+	_, _ = srv.issues.Update("gelo", 1, func(i *Issue) error { i.Fingerprint, i.FingerprintV, i.FirstVersion = "old", 0, ""; return nil })
+	srv2, err := Open(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, _ := srv2.issues.Get("gelo", 1)
+	if issue.FingerprintV != FingerprintVersion || issue.FirstVersion != "3.2" {
+		t.Fatalf("not upgraded: %+v", issue)
+	}
+	post(t, srv2, uploadVersion("00000002-0000-4000-8000-000000000000", "Crash in player", "3.4"), testKey)
+	if issue, _ = srv2.issues.Get("gelo", 1); len(issue.Reports) != 2 {
+		t.Fatal("identical report on a new version should group after the upgrade")
 	}
 }

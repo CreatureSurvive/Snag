@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 	},
 	"datetime":    func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") },
+	"day":         func(t time.Time) string { return t.Format("Jan 2") },
 	"bytes":       func(n int64) string { return formatBytes(n) },
 	"rows":        contextRows,
 	"appLine":     appLine,
@@ -51,6 +53,9 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	"percent":     func(f float64) int { return int(f*100 + 0.5) },
 	"join":        strings.Join,
 	"add":         func(a, b int) int { return a + b },
+	"sub":         func(a, b int) int { return a - b },
+	"mul":         func(a, b int) int { return a * b },
+	"max1":        func(n int) int { return max(n, 1) },
 	"statuses":    func() []string { return Statuses },
 	"priorities":  func() []string { return Priorities[1:] },
 	"query": func(base url.Values, kv ...string) string {
@@ -185,7 +190,7 @@ func (s *Server) issueFilter(r *http.Request, limit int) IssueFilter {
 	}
 	return IssueFilter{
 		Status: status, Priority: q.Get("priority"), Label: q.Get("label"), Kind: q.Get("kind"),
-		Version: q.Get("version"), Query: q.Get("q"), Sort: q.Get("sort"),
+		Version: q.Get("version"), Query: q.Get("q"), Sort: q.Get("sort"), Regressed: q.Get("regressed") != "",
 		Limit: limit, Offset: (page - 1) * limit,
 		Match: func(issue *Issue, query string) bool { return s.store.Matches(issue.Reports, query) },
 	}
@@ -216,7 +221,7 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "issues.html", map[string]any{
 		"P": p, "Issues": issues, "Total": total, "Stats": s.issues.Stats(p.Slug),
 		"Status": status, "Priority": q.Get("priority"), "Label": q.Get("label"), "Kind": q.Get("kind"),
-		"Version": q.Get("version"), "Query": q.Get("q"), "Sort": q.Get("sort"), "Q": q,
+		"Version": q.Get("version"), "Query": q.Get("q"), "Sort": q.Get("sort"), "Q": q, "Regressed": q.Get("regressed") != "",
 		"Labels": labels, "Kinds": kinds, "Versions": versions, "Next": next,
 		"Return": r.URL.RequestURI(),
 	})
@@ -374,6 +379,9 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if err := SetPriority(i, r.FormValue("priority")); err != nil {
 				return err
 			}
+		}
+		if r.Form.Has("fixedIn") {
+			SetFixedIn(i, r.FormValue("fixedIn"))
 		}
 		if r.Form.Has("title") {
 			if err := SetTitle(i, r.FormValue("title")); err != nil {
@@ -553,6 +561,104 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", file.ContentType)
 	w.Header().Set("Content-Disposition", disposition+`; filename="`+file.Filename+`"`)
 	http.ServeFile(w, r, path)
+}
+
+// MARK: Releases
+
+type versionRow struct {
+	Version   string
+	Reports   int
+	Issues    int
+	Open      int
+	New       []*Issue // first reported in this version
+	Fixed     []*Issue // fixed in this version
+	Regressed []*Issue // regressed in this version
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+type dayBar struct {
+	Day     time.Time
+	Count   int
+	Percent int
+}
+
+func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
+	p := projectFrom(r)
+	records, _ := s.store.List(Filter{Project: p.Slug})
+	allIssues, _ := s.issues.List(p.Slug, IssueFilter{})
+	issueByNumber := map[int]*Issue{}
+	for _, issue := range allIssues {
+		issueByNumber[issue.Number] = issue
+	}
+	rows := map[string]*versionRow{}
+	issueSets := map[string]map[int]bool{}
+	row := func(v string) *versionRow {
+		if v == "" {
+			v = "unknown"
+		}
+		if rows[v] == nil {
+			rows[v] = &versionRow{Version: v}
+			issueSets[v] = map[int]bool{}
+		}
+		return rows[v]
+	}
+	const days = 30
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	counts := make([]int, days)
+	for _, rec := range records {
+		v := reportVersion(rec)
+		vr := row(v)
+		vr.Reports++
+		if vr.FirstSeen.IsZero() || rec.ReceivedAt.Before(vr.FirstSeen) {
+			vr.FirstSeen = rec.ReceivedAt
+		}
+		if rec.ReceivedAt.After(vr.LastSeen) {
+			vr.LastSeen = rec.ReceivedAt
+		}
+		issue := rec.Issue
+		if i, ok := issueByNumber[issue]; ok && i.MergedInto != 0 {
+			issue = i.MergedInto
+		}
+		if i, ok := issueByNumber[issue]; ok && !issueSets[vr.Version][issue] {
+			issueSets[vr.Version][issue] = true
+			vr.Issues++
+			if i.IsOpen() {
+				vr.Open++
+			}
+		}
+		if d := int(today.Sub(rec.ReceivedAt.UTC().Truncate(24*time.Hour)).Hours() / 24); d >= 0 && d < days {
+			counts[days-1-d]++
+		}
+	}
+	for _, issue := range allIssues {
+		if issue.FirstVersion != "" {
+			vr := row(issue.FirstVersion)
+			vr.New = append(vr.New, issue)
+		}
+		if issue.FixedIn != "" {
+			vr := row(issue.FixedIn)
+			vr.Fixed = append(vr.Fixed, issue)
+		}
+		if issue.Regressions > 0 && len(issue.AppVersions) > 0 {
+			vr := row(issue.AppVersions[len(issue.AppVersions)-1])
+			vr.Regressed = append(vr.Regressed, issue)
+		}
+	}
+	list := make([]*versionRow, 0, len(rows))
+	for _, vr := range rows {
+		list = append(list, vr)
+	}
+	sort.Slice(list, func(i, j int) bool { return CompareVersions(list[i].Version, list[j].Version) > 0 })
+	peak := 1
+	for _, c := range counts {
+		peak = max(peak, c)
+	}
+	bars := make([]dayBar, days)
+	for i, c := range counts {
+		bars[i] = dayBar{Day: today.AddDate(0, 0, i-days+1), Count: c, Percent: c * 100 / peak}
+	}
+	s.render(w, "releases.html", map[string]any{"P": p, "Rows": list, "Bars": bars, "Total": len(records), "Peak": peak})
 }
 
 // MARK: Settings

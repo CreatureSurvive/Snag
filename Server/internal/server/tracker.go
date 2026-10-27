@@ -61,16 +61,24 @@ func ValidPriority(p string) bool { return contains(Priorities, p) }
 
 // Issue groups one or more reports about the same problem.
 type Issue struct {
-	Project      string    `json:"project"`
-	Number       int       `json:"number"`
-	Title        string    `json:"title"`
-	Kind         string    `json:"kind"`
-	Status       string    `json:"status"`
-	Priority     string    `json:"priority,omitempty"`
-	Labels       []string  `json:"labels,omitempty"`
-	Reports      []string  `json:"reports"` // report IDs, oldest first
-	AppVersions  []string  `json:"appVersions,omitempty"`
-	Fingerprint  string    `json:"fingerprint,omitempty"`
+	Project     string   `json:"project"`
+	Number      int      `json:"number"`
+	Title       string   `json:"title"`
+	Kind        string   `json:"kind"`
+	Status      string   `json:"status"`
+	Priority    string   `json:"priority,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	Reports     []string `json:"reports"` // report IDs, oldest first
+	AppVersions []string `json:"appVersions,omitempty"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
+	// FingerprintV is the fingerprint format; older formats are recomputed on startup.
+	FingerprintV int `json:"fingerprintV,omitempty"`
+	// FirstVersion is the app version of the first report.
+	FirstVersion string `json:"firstVersion,omitempty"`
+	// FixedIn is the app version the fix ships in. A report from that version or later
+	// reopens the issue as a regression.
+	FixedIn      string    `json:"fixedIn,omitempty"`
+	Regressions  int       `json:"regressions,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 	LastReportAt time.Time `json:"lastReportAt"`
@@ -106,14 +114,75 @@ func (i *Issue) clone() *Issue {
 	return &c
 }
 
-// Fingerprint identifies reports that are word-for-word the same problem on the same version.
+// FingerprintVersion is the current Fingerprint format.
+const FingerprintVersion = 2
+
+// Fingerprint identifies reports that are word-for-word the same problem, on any app version
+// (so a regression in a later version matches the issue it was fixed under).
 func Fingerprint(rec *Record) string {
-	version := ""
-	if rec.Context.App != nil {
-		version = rec.Context.App.Version
-	}
 	norm := func(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
-	return rec.Kind + "\x00" + version + "\x00" + norm(rec.Title) + "\x00" + norm(rec.Message)
+	return rec.Kind + "\x00" + norm(rec.Title) + "\x00" + norm(rec.Message)
+}
+
+func reportVersion(rec *Record) string {
+	if rec.Context.App == nil {
+		return ""
+	}
+	return rec.Context.App.Version
+}
+
+// CompareVersions orders dotted versions numerically ("3.10" > "3.9"); non-numeric parts
+// compare as text. It returns -1, 0 or 1.
+func CompareVersions(a, b string) int {
+	split := func(v string) []string {
+		return strings.FieldsFunc(strings.TrimPrefix(strings.TrimSpace(v), "v"), func(r rune) bool { return r == '.' || r == '-' || r == '+' || r == ' ' })
+	}
+	pa, pb := split(a), split(b)
+	for i := 0; i < max(len(pa), len(pb)); i++ {
+		var x, y string
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		nx, errx := strconv.Atoi(x)
+		ny, erry := strconv.Atoi(y)
+		if x == "" {
+			nx, errx = 0, nil
+		}
+		if y == "" {
+			ny, erry = 0, nil
+		}
+		switch {
+		// A trailing label is a pre-release: "2.0-beta" < "2.0".
+		case errx != nil && y == "":
+			return -1
+		case erry != nil && x == "":
+			return 1
+		case errx == nil && erry == nil:
+			if nx != ny {
+				if nx < ny {
+					return -1
+				}
+				return 1
+			}
+		default:
+			if c := strings.Compare(x, y); c != 0 {
+				return c
+			}
+		}
+	}
+	return 0
+}
+
+// FileResult says what happened to a new report.
+type FileResult struct {
+	Issue *Issue
+	// Created is true when the report opened a new issue.
+	Created bool
+	// Regressed is true when it reopened a resolved issue.
+	Regressed bool
 }
 
 // IssueStore keeps one JSON file per issue under <data>/issues/<project>/<number>.json.
@@ -175,28 +244,43 @@ func (is *IssueStore) saveLocked(issue *Issue) error {
 	return writeJSON(filepath.Join(dir, strconv.Itoa(issue.Number)+".json"), issue)
 }
 
-// File puts a new report into an issue: an existing open issue with the same fingerprint when
-// group is true, otherwise a new one. It returns the issue and whether it was created.
-func (is *IssueStore) File(project string, rec *Record, group bool) (*Issue, bool, error) {
+// File puts a new report into an issue. With group, a report identical to an existing issue
+// joins it: an open issue simply gains the report; a resolved one is reopened as a regression
+// unless the report comes from a version older than the one the fix shipped in.
+func (is *IssueStore) File(project string, rec *Record, group bool) (FileResult, error) {
 	is.mu.Lock()
 	defer is.mu.Unlock()
 	fp := Fingerprint(rec)
-	version := ""
-	if rec.Context.App != nil {
-		version = rec.Context.App.Version
-	}
+	version := reportVersion(rec)
 	if group {
+		var match *Issue
 		for _, issue := range is.issues[project] {
-			if issue.IsOpen() && issue.Fingerprint == fp {
-				updated := issue.clone()
-				addReport(updated, rec, version)
-				updated.log("report", "Another identical report arrived")
-				if err := is.saveLocked(updated); err != nil {
-					return nil, false, err
-				}
-				is.put(updated)
-				return updated.clone(), false, nil
+			if issue.MergedInto != 0 || issue.Fingerprint != fp || issue.Status == IssueWontFix {
+				continue
 			}
+			// Prefer an open match, then the most recent resolved one.
+			if match == nil || (issue.IsOpen() && !match.IsOpen()) || (issue.IsOpen() == match.IsOpen() && issue.Number > match.Number) {
+				match = issue
+			}
+		}
+		if match != nil {
+			updated := match.clone()
+			addReport(updated, rec, version)
+			regressed := false
+			switch {
+			case updated.IsOpen():
+				updated.log("report", "Another identical report arrived")
+			case updated.FixedIn != "" && version != "" && CompareVersions(version, updated.FixedIn) < 0:
+				updated.log("report", "Report from %s, before the fix in %s", version, updated.FixedIn)
+			default:
+				regressed = true
+				reopenAsRegression(updated, version)
+			}
+			if err := is.saveLocked(updated); err != nil {
+				return FileResult{}, err
+			}
+			is.put(updated)
+			return FileResult{Issue: updated.clone(), Regressed: regressed}, nil
 		}
 	}
 	if is.next[project] == 0 {
@@ -205,7 +289,8 @@ func (is *IssueStore) File(project string, rec *Record, group bool) (*Issue, boo
 	now := time.Now().UTC()
 	issue := &Issue{
 		Project: project, Number: is.next[project],
-		Title: reportTitle(rec), Kind: rec.Kind, Status: IssueNew, Fingerprint: fp,
+		Title: reportTitle(rec), Kind: rec.Kind, Status: IssueNew,
+		Fingerprint: fp, FingerprintV: FingerprintVersion, FirstVersion: version,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	for _, tag := range rec.Tags {
@@ -216,10 +301,71 @@ func (is *IssueStore) File(project string, rec *Record, group bool) (*Issue, boo
 	addReport(issue, rec, version)
 	issue.log("created", "Opened from a report")
 	if err := is.saveLocked(issue); err != nil {
-		return nil, false, err
+		return FileResult{}, err
 	}
 	is.put(issue)
-	return issue.clone(), true, nil
+	return FileResult{Issue: issue.clone(), Created: true}, nil
+}
+
+func reopenAsRegression(issue *Issue, version string) {
+	issue.Regressions++
+	from := issue.Status
+	issue.Status = IssueNew
+	if !contains(issue.Labels, "regression") {
+		issue.Labels = append(issue.Labels, "regression")
+		sort.Strings(issue.Labels)
+	}
+	switch {
+	case issue.FixedIn != "" && version != "":
+		issue.log("regression", "Regressed: reported in %s after the fix in %s (%s → New)", version, issue.FixedIn, StatusLabel(from))
+	case version != "":
+		issue.log("regression", "Regressed: reported again in %s after being resolved (%s → New)", version, StatusLabel(from))
+	default:
+		issue.log("regression", "Regressed: reported again after being resolved (%s → New)", StatusLabel(from))
+	}
+}
+
+// SetFixedIn records the version a fix ships in.
+func SetFixedIn(issue *Issue, version string) {
+	version = truncate(strings.TrimSpace(version), 40)
+	if version == issue.FixedIn {
+		return
+	}
+	if version == "" {
+		issue.log("release", "Cleared the fixed-in version")
+	} else {
+		issue.log("release", "Fixed in %s", version)
+	}
+	issue.FixedIn = version
+}
+
+// Refingerprint updates issues stored with an older fingerprint format, using text to find
+// each issue's first report.
+func (is *IssueStore) Refingerprint(first func(*Issue) *Record) int {
+	is.mu.Lock()
+	defer is.mu.Unlock()
+	n := 0
+	for _, issues := range is.issues {
+		for _, issue := range issues {
+			if issue.FingerprintV >= FingerprintVersion || issue.MergedInto != 0 {
+				continue
+			}
+			rec := first(issue)
+			if rec == nil {
+				continue
+			}
+			updated := issue.clone()
+			updated.Fingerprint, updated.FingerprintV = Fingerprint(rec), FingerprintVersion
+			if updated.FirstVersion == "" {
+				updated.FirstVersion = reportVersion(rec)
+			}
+			if is.saveLocked(updated) == nil {
+				is.put(updated)
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func addReport(issue *Issue, rec *Record, version string) {
@@ -483,7 +629,9 @@ type IssueFilter struct {
 	Label    string
 	Kind     string
 	Version  string
-	Query    string
+	// Regressed keeps only issues that have regressed at least once.
+	Regressed bool
+	Query     string
 	// Sort is "updated" (default), "created", "reports" or "priority".
 	Sort   string
 	Limit  int
@@ -521,7 +669,10 @@ func (f IssueFilter) keep(issue *Issue) bool {
 	if f.Kind != "" && issue.Kind != f.Kind {
 		return false
 	}
-	if f.Version != "" && !contains(issue.AppVersions, f.Version) {
+	if f.Version != "" && !contains(issue.AppVersions, f.Version) && issue.FixedIn != f.Version {
+		return false
+	}
+	if f.Regressed && issue.Regressions == 0 {
 		return false
 	}
 	if q := strings.ToLower(strings.TrimSpace(f.Query)); q != "" {

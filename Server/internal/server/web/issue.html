@@ -12,7 +12,7 @@
       <input class="title-input" name="title" value="{{.I.Title}}" aria-label="Title" maxlength="300">
       <button type="submit" class="ghost">Rename</button>
     </form>
-    <div class="tags">{{template "kind" .I.Kind}}{{template "status" .I.Status}}{{template "priority" .I.Priority}}
+    <div class="tags">{{template "kind" .I.Kind}}{{template "status" .I.Status}}{{template "priority" .I.Priority}}{{if .I.Regressions}}<span class="label regress">↺ regressed{{if gt .I.Regressions 1}} ×{{.I.Regressions}}{{end}}</span>{{end}}{{with .I.FixedIn}}<span class="label fixed">fixed in {{.}}</span>{{end}}
       <span class="muted">{{len .I.Reports}} report{{if ne (len .I.Reports) 1}}s{{end}} · opened {{ago .I.CreatedAt}}{{with .I.AppVersions}} · v{{join . ", "}}{{end}}</span>
     </div>
   </header>
@@ -124,6 +124,10 @@ Thanks for reporting this. </textarea></label>
     <label>Status
       <select name="status">{{range statuses}}<option value="{{.}}" {{if eq . $i.Status}}selected{{end}}>{{statusLabel .}}</option>{{end}}</select>
     </label>
+    <label>Fixed in version
+      <input name="fixedIn" value="{{$i.FixedIn}}" placeholder="e.g. 3.3; a later report reopens it" list="versions" maxlength="40">
+    </label>
+    <datalist id="versions">{{range $i.AppVersions}}<option value="{{.}}">{{end}}</datalist>
     <label>Priority
       <select name="priority"><option value="">None</option>{{range priorities}}<option value="{{.}}" {{if eq . $i.Priority}}selected{{end}}>{{.}}</option>{{end}}</select>
     </label>

@@ -2,17 +2,19 @@
 {{$p := .P}}
 <div class="toolbar">
   <h1>{{.P.Name}} <span class="count">{{.Stats.Open}} open</span></h1>
-  <a class="small" href="/p/{{.P.Slug}}/settings">Settings</a>
+  <span class="row"><a class="small" href="/p/{{.P.Slug}}/releases">Releases</a><a class="small" href="/p/{{.P.Slug}}/settings">Settings</a></span>
 </div>
 
 <nav class="tabs">
   <a href="{{query .Q "status" "open"}}" {{if eq .Status "open"}}aria-current="page"{{end}}>Open <span>{{.Stats.Open}}</span></a>
   {{range statuses}}<a href="{{query $.Q "status" .}}" {{if eq $.Status .}}aria-current="page"{{end}}>{{statusLabel .}} <span>{{index $.Stats.ByStatus .}}</span></a>{{end}}
   <a href="{{query .Q "status" "all"}}" {{if eq .Status "all"}}aria-current="page"{{end}}>All</a>
+  <a href="{{if .Regressed}}{{query .Q "regressed" ""}}{{else}}{{query .Q "regressed" "1"}}{{end}}" {{if .Regressed}}aria-current="page"{{end}}>↺ Regressions</a>
 </nav>
 
 <form class="filters" method="get" action="/p/{{.P.Slug}}">
   <input type="hidden" name="status" value="{{.Status}}">
+  {{if .Regressed}}<input type="hidden" name="regressed" value="1">{{end}}
   <input type="search" name="q" value="{{.Query}}" placeholder="Search titles, messages, contacts, #12…" aria-label="Search">
   <select name="priority" aria-label="Priority">
     <option value="">Any priority</option>
@@ -66,7 +68,7 @@
         <span class="num">#{{.Number}}</span>
         <span class="main">
           <span class="title">{{.Title}}</span>
-          <span class="tags">{{template "kind" .Kind}}{{template "status" .Status}}{{template "priority" .Priority}}{{range .Labels}}<span class="label">{{.}}</span>{{end}}</span>
+          <span class="tags">{{template "kind" .Kind}}{{template "status" .Status}}{{template "priority" .Priority}}{{if .Regressions}}<span class="label regress">↺ regressed{{if gt .Regressions 1}} ×{{.Regressions}}{{end}}</span>{{end}}{{with .FixedIn}}<span class="label fixed">fixed in {{.}}</span>{{end}}{{range .Labels}}<span class="label">{{.}}</span>{{end}}</span>
         </span>
         <span class="meta">
           {{if gt (len .Reports) 1}}<span class="reports" title="Reports">{{len .Reports}} reports</span>{{end}}

@@ -1,0 +1,30 @@
+{{template "head" (dict "Title" (printf "%s releases" .P.Name) "Data" .)}}
+{{$p := .P}}
+<p class="back"><a href="/p/{{.P.Slug}}">← {{.P.Name}}</a></p>
+<div class="toolbar"><h1>Releases</h1><span class="muted">{{.Total}} reports</span></div>
+
+<section class="panel">
+  <h2>Reports per day <span class="muted">· last 30 days · peak {{.Peak}}</span></h2>
+  <svg class="bars" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Reports per day for the last 30 days">
+    {{range $i, $b := .Bars}}<rect x="{{mul $i 10}}.5" y="{{sub 100 (max1 $b.Percent)}}" width="9" height="{{max1 $b.Percent}}" rx="1.5"><title>{{day $b.Day}}: {{$b.Count}}</title></rect>{{end}}
+  </svg>
+  <div class="bar-axis"><span>{{day (index .Bars 0).Day}}</span><span>today</span></div>
+</section>
+
+{{if .Rows}}
+<table class="context versions">
+  <tr><th>Version</th><th>Reports</th><th>Issues</th><th>New in this version</th><th>Fixed in this version</th><th>Seen</th></tr>
+  {{range .Rows}}
+  <tr>
+    <td><a href="/p/{{$p.Slug}}?status=all&version={{.Version}}"><strong>{{.Version}}</strong></a></td>
+    <td>{{.Reports}}</td>
+    <td>{{.Issues}}{{if .Open}} <span class="muted">({{.Open}} open)</span>{{end}}</td>
+    <td>{{range .New}}<a href="/p/{{$p.Slug}}/issues/{{.Number}}" class="chip">#{{.Number}}</a>{{else}}<span class="muted">–</span>{{end}}
+      {{range .Regressed}}<a href="/p/{{$p.Slug}}/issues/{{.Number}}" class="chip regress" title="Regressed">↺ #{{.Number}}</a>{{end}}</td>
+    <td>{{range .Fixed}}<a href="/p/{{$p.Slug}}/issues/{{.Number}}" class="chip fixed">#{{.Number}}</a>{{else}}<span class="muted">–</span>{{end}}</td>
+    <td class="muted">{{if not .FirstSeen.IsZero}}{{day .FirstSeen}} – {{ago .LastSeen}}{{else}}–{{end}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<div class="empty"><p>No reports yet.</p></div>{{end}}
+{{template "foot"}}

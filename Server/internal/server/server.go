@@ -69,6 +69,16 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	if err := s.migrate(); err != nil {
 		return nil, fmt.Errorf("migrating reports: %w", err)
 	}
+	issues.Refingerprint(func(i *Issue) *Record {
+		if len(i.Reports) == 0 {
+			return nil
+		}
+		rec, err := store.Get(i.Reports[0])
+		if err != nil {
+			return nil
+		}
+		return rec
+	})
 	s.routes()
 	return s, nil
 }
@@ -96,10 +106,11 @@ func (s *Server) migrate() error {
 				return err
 			}
 		}
-		issue, _, err := s.issues.File(slug, rec, false)
+		result, err := s.issues.File(slug, rec, false)
 		if err != nil {
 			return err
 		}
+		issue := result.Issue
 		if rec.Status == "closed" {
 			_, _ = s.issues.Update(slug, issue.Number, func(i *Issue) error { return SetStatus(i, IssueResolved) })
 		}
@@ -141,6 +152,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.admin(s.csrf(s.handleCreateProject)))
 	s.mux.HandleFunc("GET /p/{slug}", s.admin(s.project(s.handleIssues)))
 	s.mux.HandleFunc("POST /p/{slug}/bulk", s.admin(s.csrf(s.project(s.handleBulk))))
+	s.mux.HandleFunc("GET /p/{slug}/releases", s.admin(s.project(s.handleReleases)))
 	s.mux.HandleFunc("GET /p/{slug}/settings", s.admin(s.project(s.handleSettings)))
 	s.mux.HandleFunc("POST /p/{slug}/settings", s.admin(s.csrf(s.project(s.handleSaveSettings))))
 	s.mux.HandleFunc("POST /p/{slug}/keys", s.admin(s.csrf(s.project(s.handleCreateKey))))
@@ -322,7 +334,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		rec.Files = append(rec.Files, file)
 	}
 
-	issue, newIssue, err := s.issues.File(project.Slug, rec, project.GroupDuplicates)
+	filed, err := s.issues.File(project.Slug, rec, project.GroupDuplicates)
+	issue, newIssue := filed.Issue, filed.Created
 	if err != nil {
 		s.log.Error("filing report", "err", err)
 		fail(w, http.StatusInternalServerError, "couldn't save the report")
@@ -348,7 +361,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
-		s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "files", len(stored.Files))
+		s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "regressed", filed.Regressed, "files", len(stored.Files))
 		if len(stored.Forwarding) > 0 {
 			s.forwarder.Enqueue(stored.ID)
 		}

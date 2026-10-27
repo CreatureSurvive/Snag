@@ -33,7 +33,7 @@
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <h2>General</h2>
   <label>Name <input name="name" value="{{.P.Name}}" maxlength="80"></label>
-  <label class="check"><input type="checkbox" name="groupDuplicates" {{if .P.GroupDuplicates}}checked{{end}}> Group identical reports (same title, message and app version) into the open issue</label>
+  <label class="check"><input type="checkbox" name="groupDuplicates" {{if .P.GroupDuplicates}}checked{{end}}> Group identical reports (same title and message) into their issue, and reopen a resolved issue as a regression when it's reported again on its fixed-in version or later</label>
 
   <h2>Forward new issues</h2>
   <p class="hint">Each new issue is sent once to every destination below. For secret fields, leave blank to keep the current value or enter <code>-</code> to remove it.</p>
