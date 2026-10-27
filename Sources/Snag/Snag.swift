@@ -52,10 +52,18 @@ public struct SnagConfiguration: Sendable {
 public final class Snag: Sendable {
     public let configuration: SnagConfiguration
     public let outbox: Outbox
+    /// The user's own reports, for a "My Reports" screen.
+    public let inbox: ReportInbox
 
     public init(_ configuration: SnagConfiguration, startDelivery: Bool = true) {
         self.configuration = configuration
-        self.outbox = Outbox(sinks: configuration.sinks, directory: configuration.outboxDirectory, policy: configuration.retryPolicy)
+        let inbox = ReportInbox(fileURL: configuration.outboxDirectory?.appending(path: "Inbox.json"))
+        self.inbox = inbox
+        // Keep follow-up details from servers that provide them.
+        self.outbox = Outbox(sinks: configuration.sinks, directory: configuration.outboxDirectory, policy: configuration.retryPolicy,
+                             onDelivered: { id, receipt in
+                                 if let followUp = receipt.followUp { await inbox.attach(followUp, to: id) }
+                             })
         if startDelivery {
             let outbox = outbox
             Task { await outbox.startAutomaticDelivery() }
@@ -96,7 +104,14 @@ public final class Snag: Sendable {
     @discardableResult
     public func submit(_ report: Report) async throws -> Report {
         let prepared = prepare(report)
-        try await outbox.enqueue(prepared)
+        // Recorded first, so a fast delivery always finds the entry to attach to.
+        await inbox.record(prepared)
+        do {
+            try await outbox.enqueue(prepared)
+        } catch {
+            await inbox.remove(prepared.id)
+            throw error
+        }
         let outbox = outbox
         Task { await outbox.flush() }
         return prepared

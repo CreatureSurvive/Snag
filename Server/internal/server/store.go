@@ -61,6 +61,8 @@ type Record struct {
 	Forwarding map[string]*ForwardState `json:"forwarding,omitempty"`
 	RemoteAddr string                   `json:"-"`
 	UserAgent  string                   `json:"userAgent,omitempty"`
+	// ReaderTokenHash lets the reporter's app read this report's status and thread.
+	ReaderTokenHash string `json:"readerTokenHash,omitempty"`
 }
 
 type StoredFile struct {

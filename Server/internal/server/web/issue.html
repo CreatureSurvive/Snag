@@ -76,6 +76,23 @@
     </details>
     {{end}}
 
+    {{$thread := $i.ThreadFor $r.ID}}
+    <details {{if $thread}}open{{end}}>
+      <summary>In-app messages{{with $thread}} ({{len .}}){{end}}</summary>
+      {{range $thread}}
+      <div class="msg msg-{{.From}}">
+        <div class="message">{{.Text}}</div>
+        <span class="muted">{{if eq .From "team"}}You{{if not .ReportID}} · to all reporters{{end}}{{else}}Reporter{{end}} · {{datetime .At}}</span>
+      </div>
+      {{end}}
+      <form class="form" method="post" action="{{$self}}/thread">
+        <input type="hidden" name="csrf" value="{{$csrf}}">
+        <input type="hidden" name="report" value="{{$r.ID}}">
+        <textarea name="text" rows="3" required placeholder="Visible to this reporter in the app's My Reports" aria-label="Message to reporter"></textarea>
+        <button type="submit">Send in app</button>
+      </form>
+    </details>
+
     {{if canReply $r.Contact}}
     <details>
       <summary>Reply to {{$r.Contact}}</summary>
@@ -134,6 +151,14 @@ Thanks for reporting this. </textarea></label>
     <label>Add labels <input name="addLabel" list="all-labels" placeholder="crash, playback"></label>
     <datalist id="all-labels">{{range .AllLabels}}<option value="{{.}}">{{end}}</datalist>
     <button type="submit" class="primary">Save</button>
+  </form>
+
+  <form class="panel form" id="thread" method="post" action="{{$self}}/thread">
+    <h3>Message all reporters</h3>
+    <input type="hidden" name="csrf" value="{{$csrf}}">
+    <textarea name="text" rows="3" required placeholder="e.g. Fixed in 3.3, rolling out this week" aria-label="Message to all reporters"></textarea>
+    <button type="submit">Send in app</button>
+    <p class="hint">Shown in My Reports for everyone who reported this.</p>
   </form>
 
   {{if .I.Labels}}

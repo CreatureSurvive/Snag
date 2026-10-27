@@ -183,3 +183,8 @@ details .context { margin-top: 8px; }
 .bar-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 6px; }
 .versions th { width: auto; }
 .versions td { vertical-align: top; }
+
+.msg { margin: 8px 0; max-width: 85%; }
+.msg .message { padding: 8px 12px; }
+.msg-team { margin-left: auto; text-align: right; }
+.msg-team .message { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); text-align: left; }

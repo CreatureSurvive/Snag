@@ -801,3 +801,127 @@ func TestNotificationSettings(t *testing.T) {
 		t.Fatalf("env notify %+v %v", cfg.Seeds, err)
 	}
 }
+
+func TestFollowUpThread(t *testing.T) {
+	srv, _ := newTestServer(t, testConfig(t))
+	rr := post(t, srv, sampleUpload(id1), testKey)
+	var resp struct {
+		ID       string `json:"id"`
+		FollowUp struct {
+			Token string `json:"token"`
+			Path  string `json:"path"`
+		} `json:"followUp"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if !strings.HasPrefix(resp.FollowUp.Token, "snagr_") || resp.FollowUp.Path != "api/v1/followup/"+resp.ID {
+		t.Fatalf("followUp %+v", resp.FollowUp)
+	}
+	rec, _ := srv.store.Get(resp.ID)
+	if rec.ReaderTokenHash == "" || strings.Contains(mustJSON(rec), resp.FollowUp.Token) {
+		t.Fatal("reader token must be stored hashed")
+	}
+	get := func(token string) (*httptest.ResponseRecorder, ReporterStatus) {
+		req := httptest.NewRequest("GET", "/"+resp.FollowUp.Path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		var st ReporterStatus
+		_ = json.Unmarshal(rr.Body.Bytes(), &st)
+		return rr, st
+	}
+	if rr, _ := get("snagr_wrong"); rr.Code != 404 {
+		t.Fatalf("wrong token: %d", rr.Code)
+	}
+	if rr, _ := get(testKey); rr.Code != 404 {
+		t.Fatal("ingest key must not read reports")
+	}
+	_, st := get(resp.FollowUp.Token)
+	if st.Status != "received" || st.Label != "Received" || len(st.Messages) != 0 {
+		t.Fatalf("status %+v", st)
+	}
+
+	// Team messages: to this reporter, and to everyone. A second reporter sees only the broadcast.
+	adminPost(t, srv, "/p/gelo/issues/1/thread", url.Values{"report": {resp.ID}, "text": {"Which server version?"}})
+	other := ids(1)[0]
+	_ = post(t, srv, sampleUpload(other), testKey)
+	adminPost(t, srv, "/p/gelo/bulk", url.Values{"action": {"merge"}, "issue": {"1", "2"}})
+	adminPost(t, srv, "/p/gelo/issues/1/thread", url.Values{"text": {"Thanks everyone, looking into it."}})
+	adminPost(t, srv, "/p/gelo/issues/1/update", url.Values{"status": {"resolved"}, "fixedIn": {"2.1"}})
+	_, st = get(resp.FollowUp.Token)
+	if st.Status != "fixed" || st.Label != "Fixed in 2.1" || len(st.Messages) != 2 || st.Messages[0].Text != "Which server version?" || st.Messages[0].ReportID != "" {
+		t.Fatalf("after messages %+v", st)
+	}
+	issue, _ := srv.issues.Get("gelo", 1)
+	if len(issue.ThreadFor(other)) != 1 {
+		t.Fatalf("other reporter sees %d messages", len(issue.ThreadFor(other)))
+	}
+
+	// The reporter replies from the app.
+	req := httptest.NewRequest("POST", "/"+resp.FollowUp.Path+"/messages", strings.NewReader(`{"text":"Jellyfin 10.10.3"}`))
+	req.Header.Set("Authorization", "Bearer "+resp.FollowUp.Token)
+	rr = httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("reply: %d %s", rr.Code, rr.Body)
+	}
+	_, st = get(resp.FollowUp.Token)
+	if len(st.Messages) != 3 || st.Messages[2].From != FromReporter {
+		t.Fatalf("thread %+v", st.Messages)
+	}
+	page := adminGet(srv, "/p/gelo/issues/1").Body.String()
+	if !strings.Contains(page, "Jellyfin 10.10.3") || !strings.Contains(page, "to all reporters") {
+		t.Fatal("thread not on the issue page")
+	}
+	// Retrying the upload rotates the token.
+	retry := post(t, srv, sampleUpload(id1), testKey, "Idempotency-Key", id1)
+	var again struct {
+		FollowUp struct{ Token string } `json:"followUp"`
+	}
+	_ = json.Unmarshal(retry.Body.Bytes(), &again)
+	if again.FollowUp.Token == "" || again.FollowUp.Token == resp.FollowUp.Token {
+		t.Fatal("retry should return a fresh token")
+	}
+	if rr, _ := get(resp.FollowUp.Token); rr.Code != 404 {
+		t.Fatal("old token should stop working")
+	}
+	if rr, st := get(again.FollowUp.Token); rr.Code != 200 || len(st.Messages) != 3 {
+		t.Fatal("new token should work")
+	}
+	// Another project's key can't fetch this report via the idempotency shortcut.
+	srv.projects.Create("Other", "other")
+	key, _ := srv.projects.AddKey("other", "")
+	if rr := post(t, srv, sampleUpload(id1), key, "Idempotency-Key", id1); rr.Code != http.StatusConflict || strings.Contains(rr.Body.String(), "gelo") {
+		t.Fatalf("cross-project idempotency: %d %s", rr.Code, rr.Body)
+	}
+	if rr, _ := get(again.FollowUp.Token); rr.Code != 200 {
+		t.Fatal("another project's attempt must not rotate the token")
+	}
+	if _, total := srv.issues.List("other", IssueFilter{}); total != 0 {
+		t.Fatal("conflicting upload left an issue behind")
+	}
+}
+
+func TestAPIThreadMessageNeedsJSON(t *testing.T) {
+	srv, _ := newTestServer(t, testConfig(t))
+	post(t, srv, sampleUpload(id1), testKey)
+	send := func(ct, body string) int {
+		req := httptest.NewRequest("POST", "/api/v1/projects/gelo/issues/1/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", ct)
+		req.SetBasicAuth("admin", "pw-for-tests")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if code := send("application/x-www-form-urlencoded", "text=hi"); code != http.StatusUnsupportedMediaType {
+		t.Fatalf("form body: %d", code)
+	}
+	if code := send("application/json", `{"text":"hi","report":"`+strings.ToLower(id1)+`"}`); code != 200 {
+		t.Fatalf("json: %d", code)
+	}
+	if code := send("application/json", `{"text":"hi","report":"00000000-0000-4000-8000-000000000099"}`); code != 400 {
+		t.Fatalf("foreign report: %d", code)
+	}
+	if issue, _ := srv.issues.Get("gelo", 1); len(issue.Thread) != 1 {
+		t.Fatal("message not stored")
+	}
+}

@@ -187,6 +187,51 @@ final class SnagExampleUITests: XCTestCase {
     }
     #endif
 
+    #if os(iOS)
+    func testMyReportsShowsRepliesAndSendsAnswer() throws {
+        let app = try launch()
+        let report = app.buttons["example.report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 10))
+        report.tap()
+        let marker = "Inbox test \(UUID().uuidString.prefix(8))"
+        let title = app.textFields["snag.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText(marker)
+        app.buttons["snag.send"].tap()
+        XCTAssertTrue(app.staticTexts["snag.sent"].waitForExistence(timeout: 15))
+        app.buttons["snag.done"].tap()
+
+        // The server side: find the issue and message the reporter.
+        let list = try adminJSON("api/v1/reports?q=\(marker.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)")
+        let stored = try XCTUnwrap((list["reports"] as? [[String: Any]])?.first)
+        let project = try XCTUnwrap(stored["project"] as? String), issue = try XCTUnwrap(stored["issue"] as? Int)
+        let reportID = try XCTUnwrap(stored["id"] as? String)
+        _ = try admin("api/v1/projects/\(project)/issues/\(issue)/messages", json: ["text": "Thanks! Which server version?", "report": reportID])
+
+        reveal(app.buttons["example.inbox"], in: app).tap()
+        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", marker)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the report is listed")
+        XCTAssertTrue(row.label.contains("Received"), "status shown: \(row.label)")
+        attach(app, "My Reports")
+        row.tap()
+        let teamMessage = app.staticTexts["Thanks! Which server version?"]
+        XCTAssertTrue(teamMessage.waitForExistence(timeout: 10), "developer reply shown")
+        let field = app.textFields["snag.thread.reply"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Jellyfin 10.10.3")
+        app.buttons["snag.thread.send"].tap()
+        XCTAssertTrue(app.staticTexts["Jellyfin 10.10.3"].waitForExistence(timeout: 10))
+        attach(app, "Conversation")
+
+        let detail = try adminJSON("api/v1/projects/\(project)/issues/\(issue)")
+        let thread = try XCTUnwrap((detail["issue"] as? [String: Any])?["thread"] as? [[String: Any]])
+        XCTAssertEqual(thread.last?["from"] as? String, "reporter")
+        XCTAssertEqual(thread.last?["text"] as? String, "Jellyfin 10.10.3")
+    }
+    #endif
+
     func testButtonOpensFormAndCancelCloses() throws {
         let app = try launch()
         let button = app.buttons["example.report"]
@@ -228,9 +273,14 @@ final class SnagExampleUITests: XCTestCase {
         add(attachment)
     }
 
-    func admin(_ path: String) throws -> Data {
+    func admin(_ path: String, json: [String: String]? = nil) throws -> Data {
         let base = try XCTUnwrap(env["SNAG_SERVER_URL"].flatMap(URL.init(string:)))
         var request = URLRequest(url: URL(string: path, relativeTo: base.appendingPathComponent("/"))!)
+        if let json {
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: json)
+        }
         let credentials = Data("admin:\(env["SNAG_ADMIN_PASSWORD"] ?? "")".utf8).base64EncodedString()
         request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
         let done = expectation(description: path)

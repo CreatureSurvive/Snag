@@ -84,7 +84,9 @@ type Issue struct {
 	LastReportAt time.Time `json:"lastReportAt"`
 	MergedInto   int       `json:"mergedInto,omitempty"`
 	Notes        []Note    `json:"notes,omitempty"`
-	Activity     []Event   `json:"activity,omitempty"`
+	// Thread holds messages the reporters see in the app.
+	Thread   []ThreadMessage `json:"thread,omitempty"`
+	Activity []Event         `json:"activity,omitempty"`
 }
 
 type Note struct {
@@ -576,6 +578,18 @@ func (is *IssueStore) Merge(project string, into int, from []int) (*Issue, error
 			n.Text = fmt.Sprintf("(from #%d) %s", src.Number, n.Text)
 			target.Notes = append(target.Notes, n)
 		}
+		for _, m := range src.Thread {
+			if m.ReportID == "" {
+				// A broadcast to the merged issue's reporters stays with them only.
+				for _, id := range src.Reports {
+					c := m
+					c.ID, c.ReportID = newID(), id
+					target.Thread = append(target.Thread, c)
+				}
+				continue
+			}
+			target.Thread = append(target.Thread, m)
+		}
 		if src.LastReportAt.After(target.LastReportAt) {
 			target.LastReportAt = src.LastReportAt
 		}
@@ -589,6 +603,7 @@ func (is *IssueStore) Merge(project string, into int, from []int) (*Issue, error
 	}
 	sort.Strings(target.Labels)
 	sort.Slice(target.Notes, func(i, j int) bool { return target.Notes[i].At.Before(target.Notes[j].At) })
+	sort.SliceStable(target.Thread, func(i, j int) bool { return target.Thread[i].At.Before(target.Thread[j].At) })
 	for _, src := range sources {
 		if err := is.saveLocked(src); err != nil {
 			return nil, err

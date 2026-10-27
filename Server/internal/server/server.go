@@ -145,9 +145,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reports", s.handleIngest)
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
+	s.mux.HandleFunc("GET /api/v1/followup/{id}", s.handleFollowUp)
+	s.mux.HandleFunc("POST /api/v1/followup/{id}/messages", s.handleFollowUpReply)
 	s.mux.HandleFunc("GET /api/v1/projects", s.admin(s.handleAPIProjects))
 	s.mux.HandleFunc("GET /api/v1/projects/{slug}/issues", s.admin(s.handleAPIIssues))
 	s.mux.HandleFunc("GET /api/v1/projects/{slug}/issues/{n}", s.admin(s.handleAPIIssue))
+	s.mux.HandleFunc("POST /api/v1/projects/{slug}/issues/{n}/messages", s.admin(s.handleAPIThreadMessage))
 
 	s.mux.HandleFunc("GET /static/style.css", s.handleStyle)
 	s.mux.HandleFunc("GET /{$}", s.admin(s.handleOverview))
@@ -168,6 +171,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/notes/{id}/delete", s.admin(s.csrf(s.project(s.handleDeleteNote))))
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/merge", s.admin(s.csrf(s.project(s.handleMerge))))
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/reply", s.admin(s.csrf(s.project(s.handleReply))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/thread", s.admin(s.csrf(s.project(s.handleThreadMessage))))
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/forward", s.admin(s.csrf(s.project(s.handleRetryForward))))
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/delete", s.admin(s.csrf(s.project(s.handleDeleteIssue))))
 	s.mux.HandleFunc("POST /p/{slug}/reports/{id}/delete", s.admin(s.csrf(s.project(s.handleDeleteReport))))
@@ -227,8 +231,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	// A retry of a report we already have: answer without reading the body
 	// or counting it against the rate limit.
 	if key := r.Header.Get("Idempotency-Key"); ValidID(key) {
-		if existing, err := s.store.Get(key); err == nil {
-			writeJSONResponse(w, http.StatusOK, s.ingestResponse(existing))
+		if existing, err := s.store.Get(key); err == nil && existing.Project == project.Slug {
+			s.respondExisting(w, existing)
 			return
 		}
 	}
@@ -327,6 +331,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		UserAgent:  truncate(r.UserAgent(), 200),
 	}
 	rec.ID = strings.ToLower(rec.ID)
+	readerToken, readerHash := newReaderToken()
+	rec.ReaderTokenHash = readerHash
 	for _, entry := range manifest.Attachments {
 		file, ok := parts[entry.Part]
 		if !ok {
@@ -353,25 +359,45 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	stored, created, err := s.store.Commit(staged, rec)
 	committed = true
-	if err != nil || !created {
-		// Lost a race with a concurrent upload of the same report: undo the filing.
-		_ = s.issues.Unfile(project.Slug, issue.Number, rec.ID)
-	}
 	if err != nil {
+		_ = s.issues.Unfile(project.Slug, issue.Number, rec.ID)
 		s.log.Error("saving report", "err", err)
 		fail(w, http.StatusInternalServerError, "couldn't save the report")
 		return
 	}
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-		s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "regressed", filed.Regressed, "files", len(stored.Files))
-		if len(stored.Forwarding) > 0 {
-			s.forwarder.Enqueue(stored.ID)
+	if !created {
+		// Lost a race with a concurrent upload of the same report. Undo this filing unless it
+		// landed in the same issue as the stored copy (then the report ID belongs there).
+		if stored.Issue != issue.Number || stored.Project != project.Slug {
+			_ = s.issues.Unfile(project.Slug, issue.Number, rec.ID)
 		}
-		s.notifier.Notify(project, stored.Kind, alertFor(project, stored, filed, s.issueURL(project.Slug, stored.Issue)))
+		if stored.Project != project.Slug {
+			fail(w, http.StatusConflict, "this report ID is already in use")
+			return
+		}
+		s.respondExisting(w, stored)
+		return
 	}
-	writeJSONResponse(w, status, s.ingestResponse(stored))
+	s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "regressed", filed.Regressed, "files", len(stored.Files))
+	if len(stored.Forwarding) > 0 {
+		s.forwarder.Enqueue(stored.ID)
+	}
+	s.notifier.Notify(project, stored.Kind, alertFor(project, stored, filed, s.issueURL(project.Slug, stored.Issue)))
+	resp := s.ingestResponse(stored)
+	resp["followUp"] = map[string]string{"token": readerToken, "path": "api/v1/followup/" + stored.ID}
+	writeJSONResponse(w, http.StatusCreated, resp)
+}
+
+// respondExisting answers a retried upload. The original reader token was never stored, so a
+// fresh one replaces it (the client that retried never received the first).
+func (s *Server) respondExisting(w http.ResponseWriter, rec *Record) {
+	token, hash := newReaderToken()
+	if updated, err := s.store.Update(rec.ID, func(r *Record) { r.ReaderTokenHash = hash }); err == nil {
+		rec = updated
+	}
+	resp := s.ingestResponse(rec)
+	resp["followUp"] = map[string]string{"token": token, "path": "api/v1/followup/" + rec.ID}
+	writeJSONResponse(w, http.StatusOK, resp)
 }
 
 func (s *Server) ingestResponse(rec *Record) map[string]any {

@@ -38,6 +38,14 @@ struct ContentView: View {
                 }
 
                 Section {
+                    if let snag = Snag.shared {
+                        NavigationLink {
+                            SnagInboxView(snag: snag)
+                        } label: {
+                            Label("My Reports", systemImage: "tray")
+                        }
+                        .accessibilityIdentifier("example.inbox")
+                    }
                     Button {
                         SnagLog.shared.log("Tapped Report a Problem")
                         logger.info("Opening the report form")

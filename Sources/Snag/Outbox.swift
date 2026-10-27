@@ -70,17 +70,22 @@ public actor Outbox {
     public let policy: RetryPolicy
     private var sinks: [String: any ReportSink]
     private let now: @Sendable () -> Date
+    private let onDelivered: (@Sendable (UUID, Receipt) async -> Void)?
     private var entries: [UUID: Entry] = [:]
     private var loaded = false
     private var flushing = false
     private var flushRequested = false
+    private var flushWaiters: [CheckedContinuation<Void, Never>] = []
     private var continuations: [UUID: AsyncStream<Event>.Continuation] = [:]
     private var wakeTask: Task<Void, Never>?
     private var monitor: NWPathMonitor?
 
     /// - Parameter directory: Defaults to `Application Support/Snag/Outbox`.
+    /// - Parameter onDelivered: Called after each successful delivery, before its event.
     public init(sinks: [any ReportSink], directory: URL? = nil, policy: RetryPolicy = .default,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() },
+                onDelivered: (@Sendable (UUID, Receipt) async -> Void)? = nil) {
+        self.onDelivered = onDelivered
         self.sinks = Dictionary(sinks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.directory = directory ?? Self.defaultDirectory
         self.policy = policy
@@ -142,16 +147,24 @@ public actor Outbox {
         return entry
     }
 
-    /// Attempts every delivery that's due. Safe to call often; concurrent calls coalesce.
+    /// Attempts every delivery that's due, returning once that's done. Safe to call often:
+    /// concurrent calls share one pass (plus another for anything enqueued meanwhile).
     public func flush() async {
         loadIfNeeded()
-        if flushing { flushRequested = true; return }
+        if flushing {
+            flushRequested = true
+            await withCheckedContinuation { flushWaiters.append($0) }
+            return
+        }
         flushing = true
-        defer { flushing = false }
         repeat {
             flushRequested = false
             for entry in pending { await deliver(entry.id) }
         } while flushRequested
+        flushing = false
+        let waiters = flushWaiters
+        flushWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
         scheduleWake()
     }
 
@@ -239,6 +252,7 @@ public actor Outbox {
                 delivery.receipt = receipt
                 delivery.lastError = nil
                 delivery.nextAttempt = nil
+                await onDelivered?(id, receipt)
                 emit(.delivered(id, receipt))
             case .failure(let error):
                 if error is CancellationError { continue }
@@ -257,6 +271,7 @@ public actor Outbox {
             }
             entry.deliveries[sinkID] = delivery
         }
+        guard entries[id] != nil else { return } // discarded while a callback ran
         entries[id] = entry
         if entry.isComplete {
             finish(id)

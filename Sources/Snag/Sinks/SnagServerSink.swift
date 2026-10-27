@@ -38,9 +38,17 @@ public struct SnagServerSink: ReportSink {
             throw SinkError.rejected("The Snag server rejected the API key (HTTP \(status)): \(message)")
         } catch SinkError.http(413, _) {
             throw SinkError.rejected("The report is larger than the Snag server accepts (HTTP 413)")
+        } catch SinkError.http(409, let message) {
+            throw SinkError.rejected("The Snag server already has a report with this ID in another project: \(message)")
         }
-        struct Response: Decodable { var id: String; var url: URL? }
+        struct Response: Decodable {
+            var id: String
+            var url: URL?
+            var followUp: Follow?
+            struct Follow: Decodable { var token: String; var path: String }
+        }
         let response = try? JSONDecoder.snag.decode(Response.self, from: data)
-        return Receipt(sinkID: id, url: response?.url, reference: response?.id ?? report.id.uuidString)
+        let followUp = response?.followUp.map { FollowUp(url: baseURL.appending(path: $0.path), token: $0.token) }
+        return Receipt(sinkID: id, url: response?.url, reference: response?.id ?? report.id.uuidString, followUp: followUp)
     }
 }

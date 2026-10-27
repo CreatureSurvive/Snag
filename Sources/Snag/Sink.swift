@@ -19,12 +19,27 @@ public struct Receipt: Codable, Sendable, Hashable {
     public var url: URL?
     /// The destination's own identifier, such as an issue number.
     public var reference: String?
+    /// Lets the app follow the report's status and messages (Snag server only).
+    public var followUp: FollowUp?
 
-    public init(sinkID: String, deliveredAt: Date = Date(), url: URL? = nil, reference: String? = nil) {
+    public init(sinkID: String, deliveredAt: Date = Date(), url: URL? = nil, reference: String? = nil, followUp: FollowUp? = nil) {
         self.sinkID = sinkID
         self.deliveredAt = deliveredAt
         self.url = url
         self.reference = reference
+        self.followUp = followUp
+    }
+}
+
+/// Where and how the reporter's app reads a report's status and thread.
+public struct FollowUp: Codable, Sendable, Hashable {
+    public var url: URL
+    /// A per-report secret; it can only read and reply to this one report.
+    public var token: String
+
+    public init(url: URL, token: String) {
+        self.url = url
+        self.token = token
     }
 }
 
@@ -103,6 +118,12 @@ extension JSONDecoder {
             let string = try container.decode(String.self)
             if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(string) { return date }
             if let date = try? Date.ISO8601FormatStyle().parse(string) { return date }
+            // Servers such as Go write nanoseconds ("…:05.123456789Z"); keep milliseconds.
+            if let dot = string.firstIndex(of: "."), let end = string[dot...].firstIndex(where: { !$0.isNumber && $0 != "." }) {
+                let fraction = string[string.index(after: dot)..<end].prefix(3)
+                let trimmed = String(string[..<dot]) + "." + fraction.padding(toLength: 3, withPad: "0", startingAt: 0) + string[end...]
+                if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(trimmed) { return date }
+            }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected an ISO 8601 date, got \(string)")
         }
         return decoder
