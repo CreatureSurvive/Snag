@@ -1,0 +1,90 @@
+{{template "head" (dict "Title" .P.Name "Data" .)}}
+{{$p := .P}}
+<div class="toolbar">
+  <h1>{{.P.Name}} <span class="count">{{.Stats.Open}} open</span></h1>
+  <a class="small" href="/p/{{.P.Slug}}/settings">Settings</a>
+</div>
+
+<nav class="tabs">
+  <a href="{{query .Q "status" "open"}}" {{if eq .Status "open"}}aria-current="page"{{end}}>Open <span>{{.Stats.Open}}</span></a>
+  {{range statuses}}<a href="{{query $.Q "status" .}}" {{if eq $.Status .}}aria-current="page"{{end}}>{{statusLabel .}} <span>{{index $.Stats.ByStatus .}}</span></a>{{end}}
+  <a href="{{query .Q "status" "all"}}" {{if eq .Status "all"}}aria-current="page"{{end}}>All</a>
+</nav>
+
+<form class="filters" method="get" action="/p/{{.P.Slug}}">
+  <input type="hidden" name="status" value="{{.Status}}">
+  <input type="search" name="q" value="{{.Query}}" placeholder="Search titles, messages, contacts, #12…" aria-label="Search">
+  <select name="priority" aria-label="Priority">
+    <option value="">Any priority</option>
+    {{range priorities}}<option value="{{.}}" {{if eq . $.Priority}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  {{if .Labels}}<select name="label" aria-label="Label">
+    <option value="">Any label</option>
+    {{range .Labels}}<option value="{{.}}" {{if eq . $.Label}}selected{{end}}>{{.}}</option>{{end}}
+  </select>{{end}}
+  {{if gt (len .Kinds) 1}}<select name="kind" aria-label="Kind">
+    <option value="">Any kind</option>
+    {{range .Kinds}}<option value="{{.}}" {{if eq . $.Kind}}selected{{end}}>{{.}}</option>{{end}}
+  </select>{{end}}
+  {{if .Versions}}<select name="version" aria-label="App version">
+    <option value="">Any version</option>
+    {{range .Versions}}<option value="{{.}}" {{if eq . $.Version}}selected{{end}}>{{.}}</option>{{end}}
+  </select>{{end}}
+  <select name="sort" aria-label="Sort">
+    <option value="">Recently active</option>
+    <option value="created" {{if eq .Sort "created"}}selected{{end}}>Newest</option>
+    <option value="priority" {{if eq .Sort "priority"}}selected{{end}}>Priority</option>
+    <option value="reports" {{if eq .Sort "reports"}}selected{{end}}>Most reports</option>
+  </select>
+  <button type="submit">Filter</button>
+</form>
+
+{{if .Issues}}
+<form method="post" action="/p/{{.P.Slug}}/bulk">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <input type="hidden" name="return" value="{{.Return}}">
+  <div class="bulk">
+    <span>With selected:</span>
+    <select name="action" aria-label="Bulk action">
+      <optgroup label="Status">{{range statuses}}<option value="status:{{.}}">Mark {{statusLabel .}}</option>{{end}}</optgroup>
+      <optgroup label="Priority">{{range priorities}}<option value="priority:{{.}}">Priority {{.}}</option>{{end}}<option value="priority:none">No priority</option></optgroup>
+      <optgroup label="Other">
+        <option value="label:">Add label →</option>
+        <option value="merge">Merge into the oldest</option>
+        <option value="delete">Delete with reports</option>
+      </optgroup>
+    </select>
+    <input name="label" placeholder="label" aria-label="Label to add" list="labels" class="narrow">
+    <datalist id="labels">{{range .Labels}}<option value="{{.}}">{{end}}</datalist>
+    <button type="submit">Apply</button>
+  </div>
+  <ul class="issues">
+    {{range .Issues}}
+    <li>
+      <input type="checkbox" name="issue" value="{{.Number}}" aria-label="Select #{{.Number}}">
+      <a href="/p/{{$p.Slug}}/issues/{{.Number}}">
+        <span class="num">#{{.Number}}</span>
+        <span class="main">
+          <span class="title">{{.Title}}</span>
+          <span class="tags">{{template "kind" .Kind}}{{template "status" .Status}}{{template "priority" .Priority}}{{range .Labels}}<span class="label">{{.}}</span>{{end}}</span>
+        </span>
+        <span class="meta">
+          {{if gt (len .Reports) 1}}<span class="reports" title="Reports">{{len .Reports}} reports</span>{{end}}
+          {{with .AppVersions}}<span>v{{join . ", "}}</span>{{end}}
+          <span title="{{datetime .LastReportAt}}">{{ago .LastReportAt}}</span>
+          {{with .Notes}}<span>{{len .}} note{{if gt (len .) 1}}s{{end}}</span>{{end}}
+        </span>
+      </a>
+    </li>
+    {{end}}
+  </ul>
+</form>
+{{if .Next}}<p class="more"><a href="{{.Next}}">More →</a></p>{{end}}
+{{else}}
+<div class="empty">
+  {{if or .Query .Priority .Label .Kind .Version (ne .Status "open")}}<p>No issues match these filters.</p>
+  {{else}}<p><strong>Nothing open.</strong></p><p>New reports for {{.P.Name}} land here.</p>{{end}}
+</div>
+{{end}}
+<p class="footnote">{{.Total}} matching</p>
+{{template "foot"}}

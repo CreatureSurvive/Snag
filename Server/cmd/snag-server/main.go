@@ -47,12 +47,12 @@ func main() {
 		logger.Error("configuration", "err", err)
 		os.Exit(2)
 	}
-	store, err := server.OpenStore(cfg.DataDir)
+	srv, err := server.Open(cfg, logger)
 	if err != nil {
 		logger.Error("opening data directory", "dir", cfg.DataDir, "err", err)
 		os.Exit(1)
 	}
-	srv := server.New(cfg, store, logger)
+	store := srv.Store()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -94,8 +94,15 @@ func main() {
 	if cfg.AdminPassword == "" {
 		dashboard = "disabled (set SNAG_ADMIN_PASSWORD)"
 	}
+	var projects []string
+	for _, p := range srv.Projects().List() {
+		projects = append(projects, p.Slug)
+	}
+	if len(projects) == 0 {
+		logger.Warn("no projects yet: create one in the dashboard, or set SNAG_API_KEYS / SNAG_PROJECTS_FILE")
+	}
 	logger.Info("snag-server listening", "version", version, "addr", cfg.Addr, "data", cfg.DataDir,
-		"apps", len(cfg.APIKeys), "forwarders", srv.Dispatcher().Names(), "dashboard", dashboard)
+		"projects", projects, "dashboard", dashboard)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server", "err", err)
 		os.Exit(1)

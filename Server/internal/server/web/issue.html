@@ -1,0 +1,171 @@
+{{template "head" (dict "Title" (printf "#%d %s" .I.Number .I.Title) "Data" .)}}
+{{$p := .P}}{{$i := .I}}{{$csrf := .CSRF}}{{$self := .Self}}
+<p class="back"><a href="/p/{{.P.Slug}}">← {{.P.Name}}</a></p>
+{{with .Flash}}<p class="flash">{{.}}</p>{{end}}
+
+<div class="issue-layout">
+<article class="issue">
+  <header class="issue-head">
+    <form class="title-form" method="post" action="{{$self}}/update">
+      <input type="hidden" name="csrf" value="{{$csrf}}">
+      <span class="num">#{{.I.Number}}</span>
+      <input class="title-input" name="title" value="{{.I.Title}}" aria-label="Title" maxlength="300">
+      <button type="submit" class="ghost">Rename</button>
+    </form>
+    <div class="tags">{{template "kind" .I.Kind}}{{template "status" .I.Status}}{{template "priority" .I.Priority}}
+      <span class="muted">{{len .I.Reports}} report{{if ne (len .I.Reports) 1}}s{{end}} · opened {{ago .I.CreatedAt}}{{with .I.AppVersions}} · v{{join . ", "}}{{end}}</span>
+    </div>
+  </header>
+
+  {{range $idx, $v := .Reports}}{{$r := $v.R}}
+  <section class="report-card" id="report-{{$r.ID}}">
+    <header>
+      <h2>{{if eq $idx 0}}Latest report{{else}}Report{{end}} <span class="muted">· {{datetime $r.ReceivedAt}} · {{appLine $r}}</span></h2>
+      <form method="post" action="/p/{{$p.Slug}}/reports/{{$r.ID}}/delete" class="danger inline">
+        <input type="hidden" name="csrf" value="{{$csrf}}">
+        <button type="submit" class="ghost" title="Delete this report">Delete</button>
+      </form>
+    </header>
+    {{if $r.Title}}{{if ne $r.Title $i.Title}}<p><strong>{{$r.Title}}</strong></p>{{end}}{{end}}
+    {{if $r.Message}}<div class="message">{{$r.Message}}</div>{{end}}
+    {{if $r.Contact}}<p class="muted">From {{$r.Contact}}</p>{{end}}
+
+    {{range $r.Files}}{{if .IsImage}}
+    <figure class="shot">
+      <a href="/reports/{{$r.ID}}/files/{{.Name}}"><img src="/reports/{{$r.ID}}/files/{{.Name}}" alt="{{.Filename}}" loading="lazy"></a>
+      <figcaption>{{.Filename}} · {{bytes .Size}}</figcaption>
+    </figure>
+    {{end}}{{end}}
+
+    <details {{if eq $idx 0}}open{{end}}>
+      <summary>Device and app</summary>
+      <table class="context">{{range rows $r}}<tr><th>{{index . 0}}</th><td>{{index . 1}}</td></tr>{{end}}</table>
+    </details>
+
+    {{range $v.Texts}}
+    <details>
+      <summary>{{.File.Filename}} · {{bytes .File.Size}}</summary>
+      {{if .Truncated}}<p class="note">Showing the last 200 KB.</p>{{end}}
+      <pre class="log">{{.Text}}</pre>
+      <a class="small" href="/reports/{{$r.ID}}/files/{{.File.Name}}?download=1">Download</a>
+    </details>
+    {{end}}
+    {{if ne $idx 0}}{{range $r.Files}}{{if .IsText}}<a class="small" href="/reports/{{$r.ID}}/files/{{.Name}}">{{.Filename}}</a> {{end}}{{end}}{{end}}
+
+    {{if $r.Forwarding}}
+    <details>
+      <summary>Forwarding</summary>
+      <table class="context">
+        {{range $name, $st := $r.Forwarding}}
+        <tr><th>{{$name}}</th><td>
+          {{if $st.Delivered}}✓ delivered{{with $st.URL}} · <a href="{{.}}" rel="noreferrer">{{.}}</a>{{end}}
+          {{else if $st.GaveUp}}✗ gave up: {{$st.Error}}
+          {{else if $st.Attempts}}retrying ({{$st.Attempts}} failed): {{$st.Error}}
+          {{else}}pending{{end}}
+        </td></tr>
+        {{end}}
+      </table>
+      <form method="post" action="{{$self}}/forward"><input type="hidden" name="csrf" value="{{$csrf}}"><button type="submit">Retry undelivered</button></form>
+    </details>
+    {{end}}
+
+    {{if canReply $r.Contact}}
+    <details>
+      <summary>Reply to {{$r.Contact}}</summary>
+      {{if $.CanEmail}}
+      <form class="form" method="post" action="{{$self}}/reply">
+        <input type="hidden" name="csrf" value="{{$csrf}}">
+        <input type="hidden" name="report" value="{{$r.ID}}">
+        <label>Subject <input name="subject" value="Re: {{$i.Title}}" maxlength="200"></label>
+        <label>Message <textarea name="body" rows="6" required>Hi,
+
+Thanks for reporting this. </textarea></label>
+        <button type="submit" class="primary">Send email</button>
+      </form>
+      {{else}}<p class="note">Replies need SMTP. Set <code>SNAG_SMTP_HOST</code> and <code>SNAG_SMTP_FROM</code>.</p>{{end}}
+    </details>
+    {{end}}
+  </section>
+  {{end}}
+
+  <section id="notes">
+    <h2>Notes</h2>
+    {{range .I.Notes}}
+    <div class="note-card">
+      <div class="message">{{.Text}}</div>
+      <div class="note-meta"><span class="muted">{{datetime .At}}</span>
+        <form method="post" action="{{$self}}/notes/{{.ID}}/delete" class="inline"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="ghost" type="submit">Delete</button></form>
+      </div>
+    </div>
+    {{end}}
+    <form class="form" method="post" action="{{$self}}/notes">
+      <input type="hidden" name="csrf" value="{{$csrf}}">
+      <textarea name="text" rows="3" placeholder="Add an internal note (not sent to anyone)" aria-label="Note" required></textarea>
+      <button type="submit">Add note</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Activity</h2>
+    <ol class="activity">{{range .Activity}}<li><span class="muted">{{datetime .At}}</span> {{.Text}}</li>{{end}}</ol>
+  </section>
+</article>
+
+<aside class="side">
+  <form class="panel form" method="post" action="{{$self}}/update">
+    <input type="hidden" name="csrf" value="{{$csrf}}">
+    <label>Status
+      <select name="status">{{range statuses}}<option value="{{.}}" {{if eq . $i.Status}}selected{{end}}>{{statusLabel .}}</option>{{end}}</select>
+    </label>
+    <label>Priority
+      <select name="priority"><option value="">None</option>{{range priorities}}<option value="{{.}}" {{if eq . $i.Priority}}selected{{end}}>{{.}}</option>{{end}}</select>
+    </label>
+    <label>Add labels <input name="addLabel" list="all-labels" placeholder="crash, playback"></label>
+    <datalist id="all-labels">{{range .AllLabels}}<option value="{{.}}">{{end}}</datalist>
+    <button type="submit" class="primary">Save</button>
+  </form>
+
+  {{if .I.Labels}}
+  <div class="panel">
+    <h3>Labels</h3>
+    <div class="label-list">
+      {{range .I.Labels}}
+      <form method="post" action="{{$self}}/update" class="inline">
+        <input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="removeLabel" value="{{.}}">
+        <button type="submit" class="label removable" title="Remove {{.}}">{{.}} ×</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <div class="panel">
+    <h3>Possible duplicates</h3>
+    {{if .Similar}}
+    <ul class="similar">
+      {{range .Similar}}
+      <li>
+        <a href="/p/{{$p.Slug}}/issues/{{.Issue.Number}}">#{{.Issue.Number}} {{.Issue.Title}}</a>
+        <span class="muted">{{percent .Score}}% alike · {{statusLabel .Issue.Status}} · {{len .Issue.Reports}} report{{if ne (len .Issue.Reports) 1}}s{{end}}</span>
+        <form method="post" action="{{$self}}/merge" class="inline">
+          <input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="from" value="{{.Issue.Number}}">
+          <button type="submit" class="ghost">Merge into this</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="muted">None found.</p>{{end}}
+    <form method="post" action="{{$self}}/merge" class="form compact">
+      <input type="hidden" name="csrf" value="{{$csrf}}">
+      <label>Merge this issue into <input name="into" placeholder="#12" pattern="#?[0-9]+" required class="narrow"></label>
+      <button type="submit">Merge</button>
+    </form>
+  </div>
+
+  <form class="panel danger" method="post" action="{{$self}}/delete">
+    <input type="hidden" name="csrf" value="{{$csrf}}">
+    <button type="submit">Delete issue and its reports</button>
+  </form>
+</aside>
+</div>
+{{template "foot"}}

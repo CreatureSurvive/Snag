@@ -1,0 +1,71 @@
+{{template "head" (dict "Title" (printf "%s settings" .P.Name) "Data" .)}}
+<p class="back"><a href="/p/{{.P.Slug}}">← {{.P.Name}}</a></p>
+<h1>{{.P.Name}} settings</h1>
+{{with .Flash}}<p class="flash">{{.}}</p>{{end}}
+
+{{if .NewKey}}
+<div class="panel key-reveal">
+  <h2>New ingest key</h2>
+  <p>Copy it now; it isn't shown again.</p>
+  <pre class="key">{{.NewKey}}</pre>
+  <pre class="log">SnagServerSink(url: URL(string: "{{if .Ingest}}{{.Ingest}}{{else}}https://your-snag-server{{end}}")!, apiKey: "{{.NewKey}}")</pre>
+</div>
+{{end}}
+
+<section class="panel">
+  <h2>Ingest keys</h2>
+  <table class="context">
+    {{range .P.Keys}}
+    <tr><th>{{.Label}}</th><td><code>{{.Prefix}}…</code> · created {{ago .CreatedAt}}
+      <form method="post" action="/p/{{$.P.Slug}}/keys/{{.ID}}/revoke" class="inline danger"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="ghost">Revoke</button></form>
+    </td></tr>
+    {{end}}
+    {{if .P.ConfigKeyCount}}<tr><th>From server config</th><td>{{.P.ConfigKeyCount}} key{{if gt .P.ConfigKeyCount 1}}s{{end}} (change in <code>SNAG_API_KEYS</code> or the projects file)</td></tr>{{end}}
+  </table>
+  <form method="post" action="/p/{{.P.Slug}}/keys" class="form row">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input name="label" placeholder="Label, e.g. iOS 2.1" aria-label="Key label" maxlength="60">
+    <button type="submit">Create key</button>
+  </form>
+</section>
+
+<form class="panel form" method="post" action="/p/{{.P.Slug}}/settings">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2>General</h2>
+  <label>Name <input name="name" value="{{.P.Name}}" maxlength="80"></label>
+  <label class="check"><input type="checkbox" name="groupDuplicates" {{if .P.GroupDuplicates}}checked{{end}}> Group identical reports (same title, message and app version) into the open issue</label>
+
+  <h2>Forward new issues</h2>
+  <p class="hint">Each new issue is sent once to every destination below. For secret fields, leave blank to keep the current value or enter <code>-</code> to remove it.</p>
+  <fieldset>
+    <legend>GitHub Issues</legend>
+    <label>Repository <input name="githubRepo" value="{{.GH.Repo}}" placeholder="owner/repo"></label>
+    <label>Labels <input name="githubLabels" value="{{join .GH.Labels ", "}}" placeholder="snag, bug"></label>
+    <label>Screenshot branch <input name="githubBranch" value="{{.GH.AttachmentBranch}}" placeholder="snag-attachments (optional)"></label>
+    <label>Token <input name="githubToken" type="password" autocomplete="off" placeholder="{{if .GH.Token}}•••• set for this project{{else if .HasServerToken}}using SNAG_GITHUB_TOKEN{{else}}fine-grained token with Issues: write{{end}}"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Chat</legend>
+    <label>Discord webhook <input name="discord" type="password" autocomplete="off" placeholder="{{if .P.Forwarding.Discord}}•••• set{{else}}https://discord.com/api/webhooks/…{{end}}"></label>
+    <label>Slack webhook <input name="slack" type="password" autocomplete="off" placeholder="{{if .P.Forwarding.Slack}}•••• set{{else}}https://hooks.slack.com/services/…{{end}}"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Webhook</legend>
+    <label>URL <input name="webhookURL" value="{{.WH.URL}}" placeholder="https://example.com/snag"></label>
+    <label>Signing secret <input name="webhookSecret" type="password" autocomplete="off" placeholder="{{if .WH.Secret}}•••• set{{else}}optional{{end}}"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Email</legend>
+    <label>Recipients <input name="email" value="{{join .P.Forwarding.Email ", "}}" placeholder="dev@example.com" {{if not .HasSMTP}}disabled{{end}}></label>
+    {{if not .HasSMTP}}<p class="hint">Needs <code>SNAG_SMTP_HOST</code> and <code>SNAG_SMTP_FROM</code> on the server.</p>{{end}}
+  </fieldset>
+  <button type="submit" class="primary">Save settings</button>
+</form>
+
+<form class="panel danger form" method="post" action="/p/{{.P.Slug}}/delete">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2>Delete project</h2>
+  <p class="hint">Deletes every issue and report in {{.P.Name}}. Type <code>{{.P.Slug}}</code> to confirm.</p>
+  <div class="row"><input name="confirm" aria-label="Confirm slug" class="narrow"><button type="submit">Delete project</button></div>
+</form>
+{{template "foot"}}

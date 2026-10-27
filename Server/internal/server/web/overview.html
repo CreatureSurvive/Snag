@@ -1,0 +1,25 @@
+{{template "head" (dict "Title" "Projects" "Data" .)}}
+<div class="toolbar"><h1>Projects</h1><a class="button" href="/projects/new">New project</a></div>
+{{if .Cards}}
+<div class="cards">
+  {{range .Cards}}
+  <a class="card" href="/p/{{.P.Slug}}">
+    <div class="card-head"><h2>{{.P.Name}}</h2><code>{{.P.Slug}}</code></div>
+    <div class="numbers">
+      <div><strong>{{.Stats.Open}}</strong><span>open</span></div>
+      <div><strong>{{index .Stats.ByStatus "new"}}</strong><span>new</span></div>
+      <div class="{{if .Stats.Urgent}}hot{{end}}"><strong>{{.Stats.Urgent}}</strong><span>high priority</span></div>
+      <div><strong>{{.Stats.NewToday}}</strong><span>last 24h</span></div>
+    </div>
+    <p class="last">{{if .Stats.LastTitle}}Latest: {{.Stats.LastTitle}} · {{ago .Stats.LastAt}}{{else}}No reports yet{{end}}</p>
+  </a>
+  {{end}}
+</div>
+{{else}}
+<div class="empty">
+  <p><strong>No projects yet.</strong></p>
+  <p>Create one to get an ingest key for <code>SnagServerSink</code>.</p>
+  <p><a class="button" href="/projects/new">New project</a></p>
+</div>
+{{end}}
+{{template "foot"}}

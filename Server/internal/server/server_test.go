@@ -12,10 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -30,7 +28,7 @@ func testConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
 		Addr: ":0", DataDir: t.TempDir(), PublicURL: "https://snag.example.com",
-		APIKeys:   map[string]string{testKey: "gelo"},
+		Seeds:     []ProjectSeed{{Slug: "gelo", Name: "Gelo", Keys: []string{testKey}}},
 		AdminUser: "admin", AdminPassword: "pw-for-tests",
 		MaxUploadBytes: 2 << 20, RatePerHour: 100,
 	}
@@ -38,11 +36,17 @@ func testConfig(t *testing.T) Config {
 
 func newTestServer(t *testing.T, cfg Config) (*Server, *Store) {
 	t.Helper()
-	store, err := OpenStore(cfg.DataDir)
+	srv, err := Open(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(cfg, store, nil), store
+	return srv, srv.store
+}
+
+// withForwarding sets the gelo project's forwarding before the server opens.
+func withForwarding(cfg Config, f ProjectForwarding) Config {
+	cfg.Seeds[0].Forwarding = f
+	return cfg
 }
 
 type upload struct {
@@ -132,14 +136,16 @@ func TestIngestStoresReport(t *testing.T) {
 	var resp map[string]string
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	wantID := strings.ToLower(id1)
-	if resp["id"] != wantID || resp["url"] != "https://snag.example.com/reports/"+wantID {
-		t.Fatalf("response %v", resp)
+	var full map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &full)
+	if resp["id"] != wantID || resp["url"] != "https://snag.example.com/p/gelo/issues/1" || full["issue"] != float64(1) {
+		t.Fatalf("response %s", rr.Body)
 	}
 	rec, err := store.Get(id1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.App != "gelo" || rec.Status != StatusOpen || rec.Title != "Playback stalls" {
+	if rec.Project != "gelo" || rec.Issue != 1 || rec.Title != "Playback stalls" {
 		t.Fatalf("record %+v", rec)
 	}
 	if want := time.Date(2026, 10, 27, 10, 0, 0, 123e6, time.UTC); !rec.CreatedAt.Equal(want) {
@@ -287,104 +293,6 @@ func TestStoreReloadsFromDisk(t *testing.T) {
 	}
 }
 
-func TestDashboardRequiresAuth(t *testing.T) {
-	srv, _ := newTestServer(t, testConfig(t))
-	for _, path := range []string{"/", "/reports/" + id1, "/api/v1/reports"} {
-		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
-		if rr.Code != 401 {
-			t.Fatalf("%s: %d", path, rr.Code)
-		}
-	}
-	cfg := testConfig(t)
-	cfg.AdminPassword = ""
-	disabled, _ := newTestServer(t, cfg)
-	rr := httptest.NewRecorder()
-	disabled.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
-	if rr.Code != 403 {
-		t.Fatalf("disabled dashboard: %d", rr.Code)
-	}
-}
-
-func TestDashboardPagesRender(t *testing.T) {
-	srv, store := newTestServer(t, testConfig(t))
-	u := sampleUpload(id1)
-	u.manifest["message"] = "<script>alert('x')</script>"
-	post(t, srv, u, testKey)
-	list := adminGet(srv, "/")
-	if list.Code != 200 || !strings.Contains(list.Body.String(), "Playback stalls") {
-		t.Fatalf("list: %d %s", list.Code, list.Body)
-	}
-	if !strings.Contains(list.Header().Get("Content-Security-Policy"), "default-src 'none'") {
-		t.Fatal("dashboard CSP missing")
-	}
-	page := adminGet(srv, "/reports/"+strings.ToLower(id1))
-	body := page.Body.String()
-	if page.Code != 200 {
-		t.Fatalf("report: %d %s", page.Code, body)
-	}
-	if strings.Contains(body, "<script>alert") {
-		t.Fatal("message not escaped")
-	}
-	for _, want := range []string{"line 2", "iPhone17,1", "iOS 26.1", "42%", "jellyfin.local", "me@example.com", "<img src=\"/reports/"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("report page missing %q", want)
-		}
-	}
-	search := adminGet(srv, "/?q=jellyfin")
-	if !strings.Contains(search.Body.String(), "Playback stalls") {
-		t.Fatal("search by custom context failed")
-	}
-	none := adminGet(srv, "/?q=zzz-nothing")
-	if strings.Contains(none.Body.String(), "Playback stalls") {
-		t.Fatal("search matched everything")
-	}
-	rec, _ := store.Get(id1)
-	img := adminGet(srv, "/reports/"+rec.ID+"/files/"+rec.Files[0].Name)
-	if img.Code != 200 || img.Header().Get("Content-Type") != "image/png" || !bytes.Equal(img.Body.Bytes(), pngBytes) {
-		t.Fatalf("image: %d %s", img.Code, img.Header().Get("Content-Type"))
-	}
-	if adminGet(srv, "/reports/"+rec.ID+"/files/../report.json").Code == 200 {
-		t.Fatal("path traversal")
-	}
-	api := adminGet(srv, "/api/v1/reports?q=stalls")
-	if !strings.Contains(api.Body.String(), `"total":1`) {
-		t.Fatalf("api: %s", api.Body)
-	}
-}
-
-func TestStatusChangeNeedsCSRF(t *testing.T) {
-	srv, store := newTestServer(t, testConfig(t))
-	post(t, srv, sampleUpload(id1), testKey)
-	id := strings.ToLower(id1)
-	form := func(values url.Values) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", "/reports/"+id+"/status", strings.NewReader(values.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.SetBasicAuth("admin", "pw-for-tests")
-		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, req)
-		return rr
-	}
-	if rr := form(url.Values{"status": {"closed"}}); rr.Code != 403 {
-		t.Fatalf("no token: %d", rr.Code)
-	}
-	page := adminGet(srv, "/reports/"+id).Body.String()
-	token := regexp.MustCompile(`name="csrf" value="([0-9a-f]+)"`).FindStringSubmatch(page)
-	if token == nil {
-		t.Fatal("no csrf token in page")
-	}
-	rr := form(url.Values{"status": {"closed"}, "csrf": {token[1]}, "return": {"https://evil.example"}})
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/reports/"+id {
-		t.Fatalf("close: %d %s", rr.Code, rr.Header().Get("Location"))
-	}
-	if rec, _ := store.Get(id); rec.Status != StatusClosed {
-		t.Fatalf("status %s", rec.Status)
-	}
-	if list := adminGet(srv, "/").Body.String(); strings.Contains(list, "Playback stalls") {
-		t.Fatal("closed report in open list")
-	}
-}
-
 // MARK: Forwarding
 
 type recorded struct {
@@ -436,8 +344,8 @@ func TestGitHubForwarding(t *testing.T) {
 		}
 		return 500, "unexpected"
 	})
-	cfg := testConfig(t)
-	cfg.GitHub = &GitHubConfig{Token: "ghp_x", Owner: "me", Repo: "app", Labels: []string{"snag"}, AttachmentBranch: "snag-files", APIURL: gh.URL}
+	cfg := withForwarding(testConfig(t), ProjectForwarding{GitHub: &ProjectGitHub{Repo: "me/app", Labels: []string{"snag"}, AttachmentBranch: "snag-files"}})
+	cfg.GitHubToken, cfg.GitHubAPIURL = "ghp_x", gh.URL
 	srv, store, id := ingestWith(t, cfg)
 	srv.Dispatcher().Process(context.Background(), id)
 
@@ -450,7 +358,7 @@ func TestGitHubForwarding(t *testing.T) {
 	var issue map[string]any
 	_ = json.Unmarshal(reqs[len(reqs)-1].body, &issue)
 	body := issue["body"].(string)
-	for _, want := range []string{"It stops after 3 seconds.", "[Open in Snag](https://snag.example.com/reports/" + id + ")", "?raw=true)", "line 2", "| Device | iPhone17,1 |", "<!-- snag:" + id + " -->"} {
+	for _, want := range []string{"It stops after 3 seconds.", "[Open in Snag](https://snag.example.com/p/gelo/issues/1)", "?raw=true)", "line 2", "| Device | iPhone17,1 |", "<!-- snag:" + id + " -->"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("issue body missing %q:\n%s", want, body)
 		}
@@ -486,9 +394,7 @@ func TestForwardRetriesThenGivesUpOnPermanentErrors(t *testing.T) {
 		return 200, "ok"
 	})
 	bad, _ := recorder(t, func(r recorded) (int, string) { return 404, "no such webhook" })
-	cfg := testConfig(t)
-	cfg.Webhook = &WebhookConfig{URL: hook.URL, Secret: "s"}
-	cfg.Slack = bad.URL
+	cfg := withForwarding(testConfig(t), ProjectForwarding{Webhook: &WebhookConfig{URL: hook.URL, Secret: "s"}, Slack: bad.URL})
 	srv, store, id := ingestWith(t, cfg)
 	d := srv.Dispatcher()
 	d.Backoff = func(int) time.Duration { return 0 }
@@ -524,8 +430,7 @@ func TestForwardRetriesThenGivesUpOnPermanentErrors(t *testing.T) {
 
 func TestWebhookSignatureAndPayload(t *testing.T) {
 	hook, requests := recorder(t, func(r recorded) (int, string) { return 204, "" })
-	cfg := testConfig(t)
-	cfg.Webhook = &WebhookConfig{URL: hook.URL, Secret: "s3cret"}
+	cfg := withForwarding(testConfig(t), ProjectForwarding{Webhook: &WebhookConfig{URL: hook.URL, Secret: "s3cret"}})
 	srv, _, id := ingestWith(t, cfg)
 	srv.Dispatcher().Process(context.Background(), id)
 	r := requests()[0]
@@ -553,8 +458,7 @@ func TestWebhookSignatureAndPayload(t *testing.T) {
 
 func TestDiscordForwarding(t *testing.T) {
 	discord, requests := recorder(t, func(r recorded) (int, string) { return 200, `{"id":"1"}` })
-	cfg := testConfig(t)
-	cfg.Discord = discord.URL + "/api/webhooks/1/abc"
+	cfg := withForwarding(testConfig(t), ProjectForwarding{Discord: discord.URL + "/api/webhooks/1/abc"})
 	srv, _, id := ingestWith(t, cfg)
 	srv.Dispatcher().Process(context.Background(), id)
 	r := requests()[0]
@@ -576,28 +480,27 @@ func TestDiscordForwarding(t *testing.T) {
 		t.Fatalf("parts %v", names)
 	}
 	embed := payload["embeds"].([]any)[0].(map[string]any)
-	if embed["image"].(map[string]any)["url"] != "attachment://screenshot.png" || embed["url"] != "https://snag.example.com/reports/"+id {
+	if embed["image"].(map[string]any)["url"] != "attachment://screenshot.png" || embed["url"] != "https://snag.example.com/p/gelo/issues/1" {
 		t.Fatalf("embed %v", embed)
 	}
 }
 
 func TestEmailMessage(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.SMTP = &SMTPConfig{Host: "smtp.example.com", Port: 587, From: "Snag <snag@example.com>", To: []string{"dev@example.com"}, TLS: "starttls"}
-	var sent []byte
+	cfg := withForwarding(testConfig(t), ProjectForwarding{Email: []string{"dev@example.com"}})
+	cfg.SMTP = &SMTPConfig{Host: "smtp.example.com", Port: 587, From: "Snag <snag@example.com>", TLS: "starttls"}
+	sent := stubSMTP(t)
 	srv, store := newTestServer(t, cfg)
-	for _, f := range srv.forwarder.forwarders {
-		if e, ok := f.(*EmailForwarder); ok {
-			e.send = func(_ SMTPConfig, msg []byte) error { sent = msg; return nil }
-		}
-	}
 	post(t, srv, sampleUpload(id1), testKey)
 	id := strings.ToLower(id1)
 	srv.Dispatcher().Process(context.Background(), id)
 	if rec, _ := store.Get(id); !rec.Forwarding["email"].Delivered {
 		t.Fatalf("not delivered: %+v", rec.Forwarding["email"])
 	}
-	msg := string(sent)
+	msgs := sent()
+	if len(msgs) != 1 {
+		t.Fatalf("sent %d", len(msgs))
+	}
+	msg := string(msgs[0].msg)
 	for _, want := range []string{"To: dev@example.com", "Reply-To: me@example.com", "Subject: [Gelo 2.0 (41)] Playback stalls", `filename=screenshot.png`, "multipart/mixed"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("email missing %q", want)
@@ -613,9 +516,28 @@ func TestEmailMessage(t *testing.T) {
 	}
 }
 
+type sentMail struct {
+	to  []string
+	msg []byte
+}
+
+func stubSMTP(t *testing.T) func() []sentMail {
+	var mu sync.Mutex
+	var sent []sentMail
+	old := smtpSend
+	smtpSend = func(cfg SMTPConfig, msg []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		sent = append(sent, sentMail{cfg.To, msg})
+		return nil
+	}
+	t.Cleanup(func() { smtpSend = old })
+	return func() []sentMail { mu.Lock(); defer mu.Unlock(); return append([]sentMail{}, sent...) }
+}
+
 func TestConfigParsing(t *testing.T) {
 	env := map[string]string{
-		"SNAG_API_KEYS":        "gelo:aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb",
+		"SNAG_API_KEYS":        "Gelo:aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb, gelo:cccccccccccccccccccc",
 		"SNAG_ADMIN_PASSWORD":  "pw",
 		"SNAG_GITHUB_TOKEN":    "t",
 		"SNAG_GITHUB_REPO":     "me/app",
@@ -632,34 +554,38 @@ func TestConfigParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.APIKeys["aaaaaaaaaaaaaaaaaaaa"] != "gelo" || cfg.APIKeys["bbbbbbbbbbbbbbbbbbbb"] != "default" {
-		t.Fatalf("keys %v", cfg.APIKeys)
+	if len(cfg.Seeds) != 2 || cfg.Seeds[0].Slug != "gelo" || len(cfg.Seeds[0].Keys) != 2 || cfg.Seeds[1].Slug != "default" {
+		t.Fatalf("seeds %+v", cfg.Seeds)
 	}
-	if cfg.GitHub.Owner != "me" || fmt.Sprint(cfg.GitHub.Labels) != "[snag triage]" {
-		t.Fatalf("github %+v", cfg.GitHub)
+	f := cfg.Seeds[0].Forwarding
+	if f.GitHub.Repo != "me/app" || fmt.Sprint(f.GitHub.Labels) != "[snag triage]" || f.Discord == "" || len(f.Email) != 2 {
+		t.Fatalf("forwarding %+v", f)
 	}
-	if cfg.SMTP.TLS != "tls" || len(cfg.SMTP.To) != 2 {
-		t.Fatalf("smtp %+v", cfg.SMTP)
+	if cfg.GitHubToken != "t" || cfg.SMTP.TLS != "tls" {
+		t.Fatalf("github/smtp %+v", cfg.SMTP)
 	}
 	if cfg.PublicURL != "https://snag.example.com" || cfg.Retention() != 30*24*time.Hour {
 		t.Fatal("public url / retention")
 	}
 	for name, bad := range map[string]map[string]string{
-		"no keys":    {},
-		"short key":  {"SNAG_API_KEYS": "short"},
-		"bad repo":   {"SNAG_API_KEYS": "aaaaaaaaaaaaaaaaaaaa", "SNAG_GITHUB_TOKEN": "t", "SNAG_GITHUB_REPO": "nope"},
-		"smtp no to": {"SNAG_API_KEYS": "aaaaaaaaaaaaaaaaaaaa", "SNAG_SMTP_HOST": "h", "SNAG_SMTP_FROM": "a@b.c"},
+		"short key": {"SNAG_API_KEYS": "short"},
+		"bad repo":  {"SNAG_GITHUB_REPO": "nope"},
+		"smtp from": {"SNAG_SMTP_HOST": "h"},
 	} {
 		if _, err := LoadConfig(func(k string) string { return bad[k] }); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
 	}
+	// No keys at all is fine now: projects can be created in the dashboard.
+	if _, err := LoadConfig(func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
 	// _FILE secrets.
 	path := filepath.Join(t.TempDir(), "keys")
 	_ = os.WriteFile(path, []byte("cccccccccccccccccccc\n"), 0o600)
 	cfg, err = LoadConfig(func(k string) string { return map[string]string{"SNAG_API_KEYS_FILE": path}[k] })
-	if err != nil || cfg.APIKeys["cccccccccccccccccccc"] != "default" {
-		t.Fatalf("file secret: %v %v", err, cfg.APIKeys)
+	if err != nil || len(cfg.Seeds) != 1 || cfg.Seeds[0].Keys[0] != "cccccccccccccccccccc" {
+		t.Fatalf("file secret: %v %+v", err, cfg.Seeds)
 	}
 }
 

@@ -51,9 +51,12 @@ type ManifestEntry struct {
 // Record is a stored report.
 type Record struct {
 	Manifest
-	ReceivedAt time.Time                `json:"receivedAt"`
-	App        string                   `json:"app"` // from the API key
-	Status     string                   `json:"status"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Project    string    `json:"project"`
+	Issue      int       `json:"issue"`
+	// App and Status are from before projects and issues existed; read only for migration.
+	App        string                   `json:"app,omitempty"`
+	Status     string                   `json:"status,omitempty"`
 	Files      []StoredFile             `json:"files"`
 	Forwarding map[string]*ForwardState `json:"forwarding,omitempty"`
 	RemoteAddr string                   `json:"-"`
@@ -81,11 +84,6 @@ func (f StoredFile) IsImage() bool { return strings.HasPrefix(f.ContentType, "im
 func (f StoredFile) IsText() bool {
 	return strings.HasPrefix(f.ContentType, "text/") || strings.HasPrefix(f.ContentType, "application/json")
 }
-
-const (
-	StatusOpen   = "open"
-	StatusClosed = "closed"
-)
 
 var uuidPattern = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 
@@ -219,12 +217,11 @@ func (s *Store) FilePath(id, name string) (string, StoredFile, error) {
 }
 
 type Filter struct {
-	Status string
-	Kind   string
-	App    string
-	Query  string
-	Limit  int
-	Offset int
+	Project string
+	Kind    string
+	Query   string
+	Limit   int
+	Offset  int
 }
 
 // List returns matching reports, newest first, and the total number of matches.
@@ -234,13 +231,10 @@ func (s *Store) List(f Filter) ([]*Record, int) {
 	q := strings.ToLower(strings.TrimSpace(f.Query))
 	var out []*Record
 	for _, rec := range s.records {
-		if f.Status != "" && rec.Status != f.Status {
+		if f.Project != "" && rec.Project != f.Project {
 			continue
 		}
 		if f.Kind != "" && rec.Kind != f.Kind {
-			continue
-		}
-		if f.App != "" && rec.App != f.App {
 			continue
 		}
 		if q != "" && !rec.matches(q) {
@@ -265,25 +259,6 @@ func (s *Store) List(f Filter) ([]*Record, int) {
 		clones[i] = rec.clone()
 	}
 	return clones, total
-}
-
-// Facets lists the distinct apps and kinds, for filter menus.
-func (s *Store) Facets() (apps, kinds []string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	a, k := map[string]bool{}, map[string]bool{}
-	for _, rec := range s.records {
-		a[rec.App], k[rec.Kind] = true, true
-	}
-	for v := range a {
-		apps = append(apps, v)
-	}
-	for v := range k {
-		kinds = append(kinds, v)
-	}
-	sort.Strings(apps)
-	sort.Strings(kinds)
-	return
 }
 
 // Pending returns reports with forwards still to deliver.
@@ -319,7 +294,7 @@ func (s *Store) Prune(cutoff time.Time) int {
 }
 
 func (r *Record) matches(q string) bool {
-	fields := []string{r.ID, r.Title, r.Message, r.Contact, r.Kind, r.App, strings.Join(r.Tags, " ")}
+	fields := []string{r.ID, r.Title, r.Message, r.Contact, r.Kind, strings.Join(r.Tags, " ")}
 	if r.Context.App != nil {
 		fields = append(fields, r.Context.App.Name, r.Context.App.Version, r.Context.App.Build)
 	}
@@ -355,4 +330,41 @@ func writeJSON(path string, v any) error {
 		return fmt.Errorf("saving %s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+// ForIssue returns an issue's reports in the order given.
+func (s *Store) ForIssue(ids []string) []*Record {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*Record, 0, len(ids))
+	for _, id := range ids {
+		if rec, ok := s.records[strings.ToLower(id)]; ok {
+			out = append(out, rec.clone())
+		}
+	}
+	return out
+}
+
+// All returns every record (for migration).
+func (s *Store) All() []*Record {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*Record, 0, len(s.records))
+	for _, rec := range s.records {
+		out = append(out, rec.clone())
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ReceivedAt.Before(out[j].ReceivedAt) })
+	return out
+}
+
+// Matches reports whether any of ids matches a lowercase query (used by issue search).
+func (s *Store) Matches(ids []string, q string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, id := range ids {
+		if rec, ok := s.records[strings.ToLower(id)]; ok && rec.matches(q) {
+			return true
+		}
+	}
+	return false
 }

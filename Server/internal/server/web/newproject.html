@@ -1,0 +1,12 @@
+{{template "head" (dict "Title" "New project" "Data" .)}}
+<p class="back"><a href="/">← Projects</a></p>
+<h1>New project</h1>
+{{with .Error}}<p class="flash error">{{.}}</p>{{end}}
+<form class="panel form" method="post" action="/projects">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Name <input name="name" value="{{.Name}}" required maxlength="80" placeholder="Gelo"></label>
+  <label>Slug <input name="slug" value="{{.Slug}}" pattern="[a-z0-9][a-z0-9-]{0,39}" placeholder="gelo (from the name if blank)"></label>
+  <p class="hint">The slug appears in URLs and can't be changed later.</p>
+  <button type="submit" class="primary">Create project</button>
+</form>
+{{template "foot"}}

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,8 @@ import (
 type Server struct {
 	cfg       Config
 	store     *Store
+	projects  *ProjectStore
+	issues    *IssueStore
 	forwarder *Dispatcher
 	log       *slog.Logger
 	limiter   *rateLimiter
@@ -33,27 +36,86 @@ type Server struct {
 	mux       *http.ServeMux
 }
 
-func New(cfg Config, store *Store, logger *slog.Logger) *Server {
+// Open loads everything under cfg.DataDir, migrates older data, and returns a ready server.
+func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	store, err := OpenStore(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	projects, err := OpenProjects(cfg.DataDir, cfg.Seeds)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := OpenIssues(cfg.DataDir)
+	if err != nil {
+		return nil, err
 	}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
 	s := &Server{
-		cfg:     cfg,
-		store:   store,
-		log:     logger,
-		limiter: newRateLimiter(cfg.RatePerHour, time.Hour),
-		csrfKey: key,
-		mux:     http.NewServeMux(),
+		cfg:      cfg,
+		store:    store,
+		projects: projects,
+		issues:   issues,
+		log:      logger,
+		limiter:  newRateLimiter(cfg.RatePerHour, time.Hour),
+		csrfKey:  key,
+		mux:      http.NewServeMux(),
 	}
-	s.forwarder = NewDispatcher(store, BuildForwarders(cfg, s.reportURL), logger)
+	s.forwarder = NewDispatcher(store, projects, cfg, s.reportURL, logger)
+	if err := s.migrate(); err != nil {
+		return nil, fmt.Errorf("migrating reports: %w", err)
+	}
 	s.routes()
-	return s
+	return s, nil
 }
 
-// Dispatcher exposes the forwarding worker (started by Run).
+// migrate files reports from before projects and issues existed: each gets a project (from
+// its old app name) and an issue of its own.
+func (s *Server) migrate() error {
+	for _, rec := range s.store.All() {
+		if rec.Project != "" && rec.Issue != 0 {
+			continue
+		}
+		slug := rec.Project
+		if slug == "" {
+			slug = Slugify(rec.App)
+			if slug == "" {
+				slug = "default"
+			}
+		}
+		if _, ok := s.projects.Get(slug); !ok {
+			name := rec.App
+			if name == "" {
+				name = slug
+			}
+			if _, err := s.projects.Create(name, slug); err != nil && !errors.Is(err, ErrProjectExists) {
+				return err
+			}
+		}
+		issue, _, err := s.issues.File(slug, rec, false)
+		if err != nil {
+			return err
+		}
+		if rec.Status == "closed" {
+			_, _ = s.issues.Update(slug, issue.Number, func(i *Issue) error { return SetStatus(i, IssueResolved) })
+		}
+		if _, err := s.store.Update(rec.ID, func(r *Record) { r.Project, r.Issue, r.Status = slug, issue.Number, "" }); err != nil {
+			return err
+		}
+		s.log.Info("migrated report", "id", rec.ID, "project", slug, "issue", issue.Number)
+	}
+	return nil
+}
+
+// Dispatcher exposes the forwarding worker (started by main).
 func (s *Server) Dispatcher() *Dispatcher { return s.forwarder }
+func (s *Server) Store() *Store           { return s.store }
+func (s *Server) Projects() *ProjectStore { return s.projects }
+func (s *Server) Issues() *IssueStore     { return s.issues }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -69,21 +131,49 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reports", s.handleIngest)
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
+	s.mux.HandleFunc("GET /api/v1/projects", s.admin(s.handleAPIProjects))
+	s.mux.HandleFunc("GET /api/v1/projects/{slug}/issues", s.admin(s.handleAPIIssues))
+	s.mux.HandleFunc("GET /api/v1/projects/{slug}/issues/{n}", s.admin(s.handleAPIIssue))
 
-	s.mux.HandleFunc("GET /{$}", s.admin(s.handleDashboard))
-	s.mux.HandleFunc("GET /reports/{id}", s.admin(s.handleReportPage))
-	s.mux.HandleFunc("GET /reports/{id}/files/{name}", s.admin(s.handleFile))
-	s.mux.HandleFunc("POST /reports/{id}/status", s.admin(s.csrf(s.handleStatus)))
-	s.mux.HandleFunc("POST /reports/{id}/delete", s.admin(s.csrf(s.handleDelete)))
-	s.mux.HandleFunc("POST /reports/{id}/forward", s.admin(s.csrf(s.handleRetryForward)))
 	s.mux.HandleFunc("GET /static/style.css", s.handleStyle)
+	s.mux.HandleFunc("GET /{$}", s.admin(s.handleOverview))
+	s.mux.HandleFunc("GET /projects/new", s.admin(s.handleNewProject))
+	s.mux.HandleFunc("POST /projects", s.admin(s.csrf(s.handleCreateProject)))
+	s.mux.HandleFunc("GET /p/{slug}", s.admin(s.project(s.handleIssues)))
+	s.mux.HandleFunc("POST /p/{slug}/bulk", s.admin(s.csrf(s.project(s.handleBulk))))
+	s.mux.HandleFunc("GET /p/{slug}/settings", s.admin(s.project(s.handleSettings)))
+	s.mux.HandleFunc("POST /p/{slug}/settings", s.admin(s.csrf(s.project(s.handleSaveSettings))))
+	s.mux.HandleFunc("POST /p/{slug}/keys", s.admin(s.csrf(s.project(s.handleCreateKey))))
+	s.mux.HandleFunc("POST /p/{slug}/keys/{id}/revoke", s.admin(s.csrf(s.project(s.handleRevokeKey))))
+	s.mux.HandleFunc("POST /p/{slug}/delete", s.admin(s.csrf(s.project(s.handleDeleteProject))))
+	s.mux.HandleFunc("GET /p/{slug}/issues/{n}", s.admin(s.project(s.handleIssue)))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/update", s.admin(s.csrf(s.project(s.handleUpdateIssue))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/notes", s.admin(s.csrf(s.project(s.handleAddNote))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/notes/{id}/delete", s.admin(s.csrf(s.project(s.handleDeleteNote))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/merge", s.admin(s.csrf(s.project(s.handleMerge))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/reply", s.admin(s.csrf(s.project(s.handleReply))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/forward", s.admin(s.csrf(s.project(s.handleRetryForward))))
+	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/delete", s.admin(s.csrf(s.project(s.handleDeleteIssue))))
+	s.mux.HandleFunc("POST /p/{slug}/reports/{id}/delete", s.admin(s.csrf(s.project(s.handleDeleteReport))))
+	s.mux.HandleFunc("GET /reports/{id}", s.admin(s.handleReportRedirect))
+	s.mux.HandleFunc("GET /reports/{id}/files/{name}", s.admin(s.handleFile))
 }
 
-func (s *Server) reportURL(id string) string {
+// issueURL is the dashboard link for an issue, or "" without SNAG_PUBLIC_URL.
+func (s *Server) issueURL(project string, number int) string {
 	if s.cfg.PublicURL == "" {
 		return ""
 	}
-	return s.cfg.PublicURL + "/reports/" + id
+	return fmt.Sprintf("%s/p/%s/issues/%d", s.cfg.PublicURL, project, number)
+}
+
+// reportURL links a report to its issue page.
+func (s *Server) reportURL(id string) string {
+	rec, err := s.store.Get(id)
+	if err != nil || rec.Project == "" || rec.Issue == 0 {
+		return ""
+	}
+	return s.issueURL(rec.Project, rec.Issue)
 }
 
 // MARK: Ingest
@@ -102,28 +192,18 @@ func fail(w http.ResponseWriter, status int, format string, args ...any) {
 	writeJSONResponse(w, status, apiError{Error: fmt.Sprintf(format, args...)})
 }
 
-func (s *Server) authenticateApp(r *http.Request) (string, bool) {
+func (s *Server) authenticateProject(r *http.Request) (*Project, bool) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok {
-		return "", false
+		return nil, false
 	}
-	token = strings.TrimSpace(token)
-	var app string
-	found := 0
-	// Compare against every key so timing doesn't reveal which prefix matched.
-	for key, name := range s.cfg.APIKeys {
-		if subtle.ConstantTimeCompare([]byte(key), []byte(token)) == 1 {
-			app = name
-			found = 1
-		}
-	}
-	return app, found == 1
+	return s.projects.Authenticate(strings.TrimSpace(token))
 }
 
 const maxAttachments = 20
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
-	app, ok := s.authenticateApp(r)
+	project, ok := s.authenticateProject(r)
 	if !ok {
 		fail(w, http.StatusUnauthorized, "missing or invalid API key")
 		return
@@ -137,7 +217,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ip := s.clientIP(r)
-	if !s.limiter.allow(ip) {
+	if !s.limiter.allow(project.Slug + "|" + ip) {
 		w.Header().Set("Retry-After", "600")
 		fail(w, http.StatusTooManyRequests, "too many reports from this address; try again later")
 		return
@@ -226,11 +306,11 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	rec := &Record{
 		Manifest:   *manifest,
 		ReceivedAt: time.Now().UTC(),
-		App:        app,
-		Status:     StatusOpen,
+		Project:    project.Slug,
 		RemoteAddr: ip,
 		UserAgent:  truncate(r.UserAgent(), 200),
 	}
+	rec.ID = strings.ToLower(rec.ID)
 	for _, entry := range manifest.Attachments {
 		file, ok := parts[entry.Part]
 		if !ok {
@@ -241,10 +321,25 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		file.ContentType = trustedContentType(entry.ContentType, file.ContentType)
 		rec.Files = append(rec.Files, file)
 	}
-	rec.Forwarding = s.forwarder.InitialState()
+
+	issue, newIssue, err := s.issues.File(project.Slug, rec, project.GroupDuplicates)
+	if err != nil {
+		s.log.Error("filing report", "err", err)
+		fail(w, http.StatusInternalServerError, "couldn't save the report")
+		return
+	}
+	rec.Issue = issue.Number
+	if newIssue {
+		// Forward once per issue, not once per duplicate.
+		rec.Forwarding = s.forwarder.InitialState(project.Slug)
+	}
 
 	stored, created, err := s.store.Commit(staged, rec)
 	committed = true
+	if err != nil || !created {
+		// Lost a race with a concurrent upload of the same report: undo the filing.
+		_ = s.issues.Unfile(project.Slug, issue.Number, rec.ID)
+	}
 	if err != nil {
 		s.log.Error("saving report", "err", err)
 		fail(w, http.StatusInternalServerError, "couldn't save the report")
@@ -253,15 +348,17 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
-		s.log.Info("report received", "id", stored.ID, "app", app, "kind", stored.Kind, "files", len(stored.Files))
-		s.forwarder.Enqueue(stored.ID)
+		s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "files", len(stored.Files))
+		if len(stored.Forwarding) > 0 {
+			s.forwarder.Enqueue(stored.ID)
+		}
 	}
 	writeJSONResponse(w, status, s.ingestResponse(stored))
 }
 
 func (s *Server) ingestResponse(rec *Record) map[string]any {
-	out := map[string]any{"id": rec.ID}
-	if u := s.reportURL(rec.ID); u != "" {
+	out := map[string]any{"id": rec.ID, "project": rec.Project, "issue": rec.Issue}
+	if u := s.issueURL(rec.Project, rec.Issue); u != "" {
 		out["url"] = u
 	}
 	return out
@@ -430,7 +527,7 @@ func (s *Server) csrf(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	records, total := s.store.List(Filter{Status: q.Get("status"), Kind: q.Get("kind"), App: q.Get("app"), Query: q.Get("q"), Limit: 200})
+	records, total := s.store.List(Filter{Project: q.Get("project"), Kind: q.Get("kind"), Query: q.Get("q"), Limit: 200})
 	writeJSONResponse(w, http.StatusOK, map[string]any{"total": total, "reports": records})
 }
 
@@ -441,6 +538,39 @@ func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONResponse(w, http.StatusOK, rec)
+}
+
+func (s *Server) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
+	type item struct {
+		Slug  string       `json:"slug"`
+		Name  string       `json:"name"`
+		Stats ProjectStats `json:"stats"`
+	}
+	var out []item
+	for _, p := range s.projects.List() {
+		out = append(out, item{p.Slug, p.Name, s.issues.Stats(p.Slug)})
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]any{"projects": out})
+}
+
+func (s *Server) handleAPIIssues(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if _, ok := s.projects.Get(slug); !ok {
+		fail(w, http.StatusNotFound, "no such project")
+		return
+	}
+	issues, total := s.issues.List(slug, s.issueFilter(r, 200))
+	writeJSONResponse(w, http.StatusOK, map[string]any{"total": total, "issues": issues})
+}
+
+func (s *Server) handleAPIIssue(w http.ResponseWriter, r *http.Request) {
+	n, _ := strconv.Atoi(r.PathValue("n"))
+	issue, err := s.issues.Get(r.PathValue("slug"), n)
+	if err != nil {
+		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]any{"issue": issue, "reports": s.store.ForIssue(issue.Reports)})
 }
 
 // MARK: Rate limiting

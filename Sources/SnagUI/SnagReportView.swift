@@ -169,7 +169,7 @@ public struct SnagReportView: View {
             if canEmail, !snag.configuration.sinks.isEmpty {
                 Section {
                     Button("Send by Email Instead") { composingMail = snag.prepare(makeReport()) }
-                        .disabled(!canSend)
+                        .disabled(!canSend || loading)
                 }
             }
             #endif
@@ -311,9 +311,10 @@ public struct SnagReportView: View {
             return
         }
         phase = .sending
-        let report = makeReport()
         Task {
+            // Logs and context may still be loading; build the report once they're in.
             while loading { try? await Task.sleep(for: .milliseconds(50)) }
+            let report = makeReport()
             let events = await snag.outbox.events()
             do {
                 let submitted = try await snag.submit(report)

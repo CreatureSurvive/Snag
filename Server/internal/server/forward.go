@@ -18,6 +18,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"os"
@@ -66,23 +67,38 @@ func doHTTP(ctx context.Context, req *http.Request) ([]byte, error) {
 	return nil, err
 }
 
-// BuildForwarders creates every forwarder the config enables.
-func BuildForwarders(cfg Config, reportURL func(id string) string) []Forwarder {
+// BuildForwarders creates the forwarders a project enables.
+func BuildForwarders(p *Project, cfg Config, reportURL func(id string) string) []Forwarder {
 	var out []Forwarder
-	if cfg.GitHub != nil {
-		out = append(out, &GitHubForwarder{cfg: *cfg.GitHub, reportURL: reportURL})
+	f := p.Forwarding
+	if f.GitHub != nil && f.GitHub.Repo != "" {
+		owner, repo, _ := strings.Cut(f.GitHub.Repo, "/")
+		token := f.GitHub.Token
+		if token == "" {
+			token = cfg.GitHubToken
+		}
+		api := cfg.GitHubAPIURL
+		if api == "" {
+			api = "https://api.github.com"
+		}
+		out = append(out, &GitHubForwarder{cfg: GitHubConfig{
+			Token: token, Owner: owner, Repo: repo, Labels: f.GitHub.Labels,
+			AttachmentBranch: f.GitHub.AttachmentBranch, APIURL: api,
+		}, reportURL: reportURL})
 	}
-	if cfg.Discord != "" {
-		out = append(out, &DiscordForwarder{webhook: cfg.Discord, reportURL: reportURL})
+	if f.Discord != "" {
+		out = append(out, &DiscordForwarder{webhook: f.Discord, reportURL: reportURL})
 	}
-	if cfg.Slack != "" {
-		out = append(out, &SlackForwarder{webhook: cfg.Slack, reportURL: reportURL})
+	if f.Slack != "" {
+		out = append(out, &SlackForwarder{webhook: f.Slack, reportURL: reportURL})
 	}
-	if cfg.Webhook != nil {
-		out = append(out, &WebhookForwarder{cfg: *cfg.Webhook})
+	if f.Webhook != nil && f.Webhook.URL != "" {
+		out = append(out, &WebhookForwarder{cfg: *f.Webhook})
 	}
-	if cfg.SMTP != nil {
-		out = append(out, &EmailForwarder{cfg: *cfg.SMTP, reportURL: reportURL})
+	if len(f.Email) > 0 && cfg.SMTP != nil {
+		smtp := *cfg.SMTP
+		smtp.To = f.Email
+		out = append(out, &EmailForwarder{cfg: smtp, reportURL: reportURL})
 	}
 	return out
 }
@@ -92,26 +108,29 @@ func BuildForwarders(cfg Config, reportURL func(id string) string) []Forwarder {
 // Dispatcher runs forwards in the background with retries. State lives in each record, so
 // pending forwards resume after a restart.
 type Dispatcher struct {
-	store      *Store
-	forwarders map[string]Forwarder
-	names      []string
-	log        *slog.Logger
-	queue      chan string
-	wake       chan struct{}
-	mu         sync.Mutex
-	inFlight   map[string]bool
+	store     *Store
+	projects  *ProjectStore
+	cfg       Config
+	reportURL func(string) string
+	log       *slog.Logger
+	queue     chan string
+	mu        sync.Mutex
+	inFlight  map[string]bool
 	// Backoff is the delay after the nth failure.
 	Backoff     func(attempt int) time.Duration
 	MaxAttempts int
+	// Build makes a project's forwarders; tests replace it.
+	Build func(p *Project) []Forwarder
 }
 
-func NewDispatcher(store *Store, forwarders []Forwarder, logger *slog.Logger) *Dispatcher {
+func NewDispatcher(store *Store, projects *ProjectStore, cfg Config, reportURL func(string) string, logger *slog.Logger) *Dispatcher {
 	d := &Dispatcher{
 		store:       store,
-		forwarders:  map[string]Forwarder{},
+		projects:    projects,
+		cfg:         cfg,
+		reportURL:   reportURL,
 		log:         logger,
 		queue:       make(chan string, 1024),
-		wake:        make(chan struct{}, 1),
 		inFlight:    map[string]bool{},
 		MaxAttempts: 20,
 		Backoff: func(attempt int) time.Duration {
@@ -122,23 +141,38 @@ func NewDispatcher(store *Store, forwarders []Forwarder, logger *slog.Logger) *D
 			return time.Duration(float64(d) * (0.8 + 0.4*rand.Float64()))
 		},
 	}
-	for _, f := range forwarders {
-		d.forwarders[f.Name()] = f
-		d.names = append(d.names, f.Name())
-	}
-	sort.Strings(d.names)
+	d.Build = func(p *Project) []Forwarder { return BuildForwarders(p, d.cfg, d.reportURL) }
 	return d
 }
 
-func (d *Dispatcher) Names() []string { return d.names }
+func (d *Dispatcher) forwarders(slug string) map[string]Forwarder {
+	out := map[string]Forwarder{}
+	if p, ok := d.projects.Get(slug); ok {
+		for _, f := range d.Build(p) {
+			out[f.Name()] = f
+		}
+	}
+	return out
+}
 
-// InitialState is the forwarding state for a newly received report.
-func (d *Dispatcher) InitialState() map[string]*ForwardState {
-	if len(d.names) == 0 {
+// Names lists the forwarders a project has, sorted.
+func (d *Dispatcher) Names(slug string) []string {
+	var names []string
+	for name := range d.forwarders(slug) {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// InitialState is the forwarding state for a report that opens a new issue.
+func (d *Dispatcher) InitialState(slug string) map[string]*ForwardState {
+	names := d.Names(slug)
+	if len(names) == 0 {
 		return nil
 	}
 	state := map[string]*ForwardState{}
-	for _, name := range d.names {
+	for _, name := range names {
 		state[name] = &ForwardState{}
 	}
 	return state
@@ -152,13 +186,19 @@ func (d *Dispatcher) Enqueue(id string) {
 	}
 }
 
-// Retry clears backoff for one report's undelivered forwards and queues it.
+// Retry clears backoff for one report's undelivered forwards (adding any the project gained
+// since) and queues it.
 func (d *Dispatcher) Retry(id string) error {
-	_, err := d.store.Update(id, func(rec *Record) {
+	rec, err := d.store.Get(id)
+	if err != nil {
+		return err
+	}
+	names := d.Names(rec.Project)
+	_, err = d.store.Update(id, func(rec *Record) {
 		if rec.Forwarding == nil {
 			rec.Forwarding = map[string]*ForwardState{}
 		}
-		for _, name := range d.names {
+		for _, name := range names {
 			st, ok := rec.Forwarding[name]
 			if !ok {
 				st = &ForwardState{}
@@ -168,6 +208,7 @@ func (d *Dispatcher) Retry(id string) error {
 				st.GaveUp = false
 				st.NextAttempt = time.Time{}
 				st.Attempts = 0
+				st.Error = ""
 			}
 		}
 	})
@@ -179,9 +220,6 @@ func (d *Dispatcher) Retry(id string) error {
 
 // Run processes the queue until ctx ends, sweeping for due retries every interval.
 func (d *Dispatcher) Run(ctx context.Context, interval time.Duration) {
-	if len(d.forwarders) == 0 {
-		return
-	}
 	for _, rec := range d.store.Pending() {
 		d.Enqueue(rec.ID)
 	}
@@ -228,13 +266,28 @@ func (d *Dispatcher) Process(ctx context.Context, id string) {
 		}
 		return os.ReadFile(path)
 	}
-	for _, name := range d.names {
+	forwarders := d.forwarders(rec.Project)
+	names := make([]string, 0, len(rec.Forwarding))
+	for name := range rec.Forwarding {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		st := rec.Forwarding[name]
 		if st == nil || st.Delivered || st.GaveUp || now.Before(st.NextAttempt) {
 			continue
 		}
+		forwarder, ok := forwarders[name]
+		if !ok {
+			_, _ = d.store.Update(id, func(r *Record) {
+				if s := r.Forwarding[name]; s != nil {
+					s.GaveUp, s.Error = true, "no longer configured for this project"
+				}
+			})
+			continue
+		}
 		fctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		url, ferr := d.forwarders[name].Forward(fctx, rec, opener)
+		url, ferr := forwarder.Forward(fctx, rec, opener)
 		cancel()
 		if ctx.Err() != nil {
 			return
@@ -281,7 +334,7 @@ func reportTitle(rec *Record) string {
 
 func appLine(rec *Record) string {
 	if rec.Context.App == nil {
-		return rec.App
+		return rec.Project
 	}
 	parts := []string{rec.Context.App.Name}
 	if rec.Context.App.Version != "" {
@@ -509,7 +562,7 @@ func (d *DiscordForwarder) Forward(ctx context.Context, rec *Record, open FileOp
 		"title":       truncate(reportTitle(rec), 256),
 		"description": truncate(rec.Message, 4000),
 		"timestamp":   rec.CreatedAt.Format(time.RFC3339),
-		"footer":      map[string]string{"text": rec.Kind + " · " + rec.App + " · " + rec.ID},
+		"footer":      map[string]string{"text": rec.Kind + " · " + rec.Project + " · " + rec.ID},
 		"fields":      fields,
 		"color":       color,
 	}
@@ -587,7 +640,7 @@ func (s *SlackForwarder) Forward(ctx context.Context, rec *Record, _ FileOpener)
 	if len(lines) > 0 {
 		blocks = append(blocks, map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": truncate(strings.Join(lines, "\n"), 2900)}})
 	}
-	footer := rec.Kind + " · " + rec.App
+	footer := rec.Kind + " · " + rec.Project
 	if rec.Contact != "" {
 		footer += " · " + esc.Replace(rec.Contact)
 	}
@@ -658,9 +711,10 @@ func Sign(body []byte, timestamp, secret string) string {
 type EmailForwarder struct {
 	cfg       SMTPConfig
 	reportURL func(string) string
-	// send is smtp delivery; tests replace it.
-	send func(cfg SMTPConfig, msg []byte) error
 }
+
+// smtpSend delivers a message; tests replace it.
+var smtpSend = sendSMTP
 
 func (e *EmailForwarder) Name() string { return "email" }
 
@@ -669,21 +723,22 @@ func (e *EmailForwarder) Forward(ctx context.Context, rec *Record, open FileOpen
 	if err != nil {
 		return "", err
 	}
-	send := e.send
-	if send == nil {
-		send = sendSMTP
-	}
+	return "", deliverMail(ctx, e.cfg, msg)
+}
+
+func deliverMail(ctx context.Context, cfg SMTPConfig, msg []byte) error {
+	send := smtpSend
 	done := make(chan error, 1)
-	go func() { done <- send(e.cfg, msg) }()
+	go func() { done <- send(cfg, msg) }()
 	select {
 	case err := <-done:
 		var protoErr *textproto.Error
 		if errors.As(err, &protoErr) && protoErr.Code >= 500 {
-			return "", PermanentError{err}
+			return PermanentError{err}
 		}
-		return "", err
+		return err
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return ctx.Err()
 	}
 }
 
@@ -927,4 +982,46 @@ func urlPathEscape(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// MARK: Replies
+
+// BuildReply renders a plain-text email to a reporter.
+func BuildReply(cfg SMTPConfig, to, subject, body, reportID string) ([]byte, error) {
+	addr, err := mail.ParseAddress(to)
+	if err != nil || strings.ContainsAny(to, "\r\n") {
+		return nil, fmt.Errorf("%q isn't a valid email address", to)
+	}
+	subject = strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(subject))
+	if subject == "" {
+		return nil, errors.New("the subject is empty")
+	}
+	if strings.TrimSpace(body) == "" {
+		return nil, errors.New("the message is empty")
+	}
+	var buf bytes.Buffer
+	header := func(k, v string) { fmt.Fprintf(&buf, "%s: %s\r\n", k, v) }
+	header("From", cfg.From)
+	header("To", addr.String())
+	if cfg.ReplyTo != "" {
+		header("Reply-To", cfg.ReplyTo)
+	}
+	header("Subject", mime.QEncoding.Encode("utf-8", truncate(subject, 200)))
+	header("Date", time.Now().Format(time.RFC1123Z))
+	header("Message-ID", "<reply-"+newID()+"@snag>")
+	if reportID != "" {
+		header("References", "<"+reportID+"@snag>")
+	}
+	header("MIME-Version", "1.0")
+	header("Content-Type", "text/plain; charset=utf-8")
+	header("Content-Transfer-Encoding", "base64")
+	buf.WriteString("\r\n")
+	writeBase64Lines(&buf, []byte(strings.ReplaceAll(body, "\r\n", "\n")))
+	return buf.Bytes(), nil
+}
+
+// SendReply emails a reporter through the server's SMTP settings.
+func SendReply(ctx context.Context, cfg SMTPConfig, to string, msg []byte) error {
+	cfg.To = []string{to}
+	return deliverMail(ctx, cfg, msg)
 }

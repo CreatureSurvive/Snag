@@ -4,12 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>{{.}} · Snag</title>
-<link rel="stylesheet" href="/static/style.css">
+<title>{{.Title}} · Snag</title>
+<link rel="stylesheet" href="/static/style.css?v={{cssVersion}}">
 </head>
 <body>
 <header class="top">
   <a class="brand" href="/">Snag</a>
+  <nav class="projects">
+    {{range .Data.AllProjects}}<a href="/p/{{.Slug}}" {{if and $.Data.P (eq .Slug $.Data.P.Slug)}}aria-current="page"{{end}}>{{.Name}}</a>{{end}}
+    <a class="add" href="/projects/new" title="New project">+</a>
+  </nav>
 </header>
 <main>
 {{end}}
@@ -18,3 +22,6 @@
 </body>
 </html>
 {{end}}
+{{define "kind"}}<span class="kind kind-{{.}}">{{if eq . "feature"}}idea{{else}}{{.}}{{end}}</span>{{end}}
+{{define "status"}}<span class="status status-{{.}}">{{statusLabel .}}</span>{{end}}
+{{define "priority"}}{{if .}}<span class="priority priority-{{.}}">{{.}}</span>{{end}}{{end}}
