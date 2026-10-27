@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 
 /// End to end: open the form, send a report to a real snag-server, then fetch it back and check
@@ -46,7 +47,7 @@ final class SnagExampleUITests: XCTestCase {
         message.tap()
         message.typeText("Playback stalls. password=topsecret99")
 
-        app.buttons["snag.preview"].tap()
+        reveal(app.buttons["snag.preview"], in: app).tap()
         let previewBar = app.navigationBars["What's Included"]
         XCTAssertTrue(previewBar.waitForExistence(timeout: 5))
         attach(app, "What's included")
@@ -109,6 +110,83 @@ final class SnagExampleUITests: XCTestCase {
     }
     #endif
 
+    #if os(iOS)
+    func testCaptureMoreScreensAndRecord() throws {
+        let app = try launch()
+        let email = app.staticTexts["example.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+        let emailFrame = email.frame, window = app.windows.firstMatch.frame
+        app.buttons["example.report"].tap()
+        XCTAssertTrue(app.textFields["snag.title"].waitForExistence(timeout: 5))
+
+        // Two more screens through the floating button.
+        reveal(app.buttons["snag.captureMore"], in: app).tap()
+        let capture = app.buttons["snag.overlay.capture"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 5), "floating capture button appears")
+        attach(app, "Capture overlay")
+        capture.tap()
+        capture.tap()
+        app.buttons["snag.overlay.done"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["snag.shot.2"].waitForExistence(timeout: 5), "three screenshots in the form")
+        attach(app, "Three screenshots")
+        app.buttons["snag.shot.0.remove"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["snag.shot.2"].waitForExistence(timeout: 1))
+
+        // Record about three seconds.
+        reveal(app.buttons["snag.record"], in: app).tap()
+        let record = app.buttons["snag.overlay.record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 5))
+        record.tap()
+        XCTAssertTrue(app.buttons["snag.overlay.stop"].waitForExistence(timeout: 3))
+        attach(app, "Recording")
+        sleep(3)
+        app.buttons["snag.overlay.stop"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["snag.recording"].waitForExistence(timeout: 10), "recording attached")
+        attach(app, "Form with recording")
+
+        let marker = "Capture test \(UUID().uuidString.prefix(8))"
+        let title = app.textFields["snag.title"]
+        title.tap()
+        title.typeText(marker)
+        app.buttons["snag.send"].tap()
+        XCTAssertTrue(app.staticTexts["snag.sent"].waitForExistence(timeout: 20))
+
+        let list = try adminJSON("api/v1/reports?q=\(marker.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)")
+        let report = try XCTUnwrap((list["reports"] as? [[String: Any]])?.first)
+        let files = try XCTUnwrap(report["files"] as? [[String: Any]])
+        let id = try XCTUnwrap(report["id"] as? String)
+        XCTAssertEqual(files.filter { $0["role"] as? String == "screenshot" }.count, 2)
+        let video = try XCTUnwrap(files.first { $0["role"] as? String == "recording" })
+        XCTAssertEqual(video["contentType"] as? String, "video/mp4")
+
+        let mp4 = try admin("reports/\(id)/files/\(video["name"] as! String)")
+        let url = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mp4")
+        try mp4.write(to: url)
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let done = expectation(description: "frame")
+        let box = FrameBox()
+        generator.generateCGImageAsynchronously(for: CMTime(seconds: 1, preferredTimescale: 600)) { image, _, error in
+            box.image = image
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 15)
+        let frame = try XCTUnwrap(box.image, "decode a frame from the uploaded recording")
+        let still = XCTAttachment(image: UIImage(cgImage: frame))
+        still.name = "Recording frame at 1s"
+        still.lifetime = .keepAlways
+        add(still)
+        for fx in [0.2, 0.5, 0.8] {
+            let x = (emailFrame.minX + emailFrame.width * fx) / window.width * CGFloat(frame.width)
+            let y = emailFrame.midY / window.height * CGFloat(frame.height)
+            let p = pixel(frame, x: Int(x), y: Int(y))
+            XCTAssertTrue(p.r < 50 && p.g < 50 && p.b < 50, "private email visible in the recording at \(fx): \(p)")
+        }
+    }
+    #endif
+
     func testButtonOpensFormAndCancelCloses() throws {
         let app = try launch()
         let button = app.buttons["example.report"]
@@ -134,6 +212,14 @@ final class SnagExampleUITests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Scrolls the form until `element` is on screen.
+    func reveal(_ element: XCUIElement, in app: XCUIApplication) -> XCUIElement {
+        for _ in 0..<6 where !(element.exists && element.isHittable) {
+            app.swipeUp()
+        }
+        return element
+    }
 
     func attach(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -176,4 +262,8 @@ final class ResultBox: @unchecked Sendable {
     private var result: Result<Data, any Error> = .failure(URLError(.unknown))
     func set(_ value: Result<Data, any Error>) { lock.withLock { result = value } }
     func get() throws -> Data { try lock.withLock { result }.get() }
+}
+
+final class FrameBox: @unchecked Sendable {
+    var image: CGImage?
 }

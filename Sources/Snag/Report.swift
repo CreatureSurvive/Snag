@@ -96,6 +96,8 @@ public struct Attachment: Codable, Sendable, Identifiable, Hashable {
 
     public enum Role: String, Codable, Sendable, Hashable {
         case screenshot
+        /// A screen recording (MP4).
+        case recording
         case log
         case file
     }
@@ -113,6 +115,7 @@ public struct Attachment: Codable, Sendable, Identifiable, Hashable {
     }
 
     public var isImage: Bool { contentType.hasPrefix("image/") }
+    public var isVideo: Bool { contentType.hasPrefix("video/") }
     public var isText: Bool { contentType.hasPrefix("text/") || contentType.hasPrefix("application/json") }
 
     /// Strips path components and characters that are unsafe in file names and HTTP headers.

@@ -30,12 +30,19 @@
     {{if $r.Message}}<div class="message">{{$r.Message}}</div>{{end}}
     {{if $r.Contact}}<p class="muted">From {{$r.Contact}}</p>{{end}}
 
+    <div class="media">
     {{range $r.Files}}{{if .IsImage}}
     <figure class="shot">
       <a href="/reports/{{$r.ID}}/files/{{.Name}}"><img src="/reports/{{$r.ID}}/files/{{.Name}}" alt="{{.Filename}}" loading="lazy"></a>
       <figcaption>{{.Filename}} · {{bytes .Size}}</figcaption>
     </figure>
+    {{else if .IsVideo}}
+    <figure class="shot">
+      <video controls preload="metadata" playsinline src="/reports/{{$r.ID}}/files/{{.Name}}"></video>
+      <figcaption>{{.Filename}} · {{bytes .Size}} · <a href="/reports/{{$r.ID}}/files/{{.Name}}?download=1">Download</a></figcaption>
+    </figure>
     {{end}}{{end}}
+    </div>
 
     <details {{if eq $idx 0}}open{{end}}>
       <summary>Device and app</summary>

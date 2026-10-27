@@ -1,3 +1,4 @@
+import ImageIO
 import Snag
 import SwiftUI
 #if canImport(UIKit)
@@ -8,7 +9,8 @@ import AppKit
 
 /// A screenshot with private regions already removed.
 public struct Screenshot: Sendable, Hashable {
-    /// PNG bytes. Redacted regions are solid in these pixels; there's no layer to peel off.
+    /// Image bytes: PNG for captures, JPEG for photos picked from the library. Redacted regions
+    /// are solid in these pixels; there's no layer to peel off.
     public var png: Data
     /// Size in points.
     public var size: CGSize
@@ -26,8 +28,8 @@ public struct Screenshot: Sendable, Hashable {
     public var attachment: Attachment { .screenshot(png: png) }
 
     public var cgImage: CGImage? {
-        guard let provider = CGDataProvider(data: png as CFData) else { return nil }
-        return CGImage(pngDataProviderSource: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        guard let source = CGImageSourceCreateWithData(png as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     public var image: Image? {
@@ -54,6 +56,20 @@ public enum ScreenCapture {
         redaction: AutomaticRedaction = .standard,
         maximumScale: CGFloat = 2
     ) -> Screenshot? {
+        guard let frame = captureFrame(scene: scene, redaction: redaction, maximumScale: maximumScale),
+              let png = frame.image.pngData() else { return nil }
+        return Screenshot(png: png, size: frame.size, scale: frame.scale, redactedRegions: frame.regions)
+    }
+
+    /// A redacted frame before encoding, for the screen recorder.
+    struct Frame {
+        var image: UIImage
+        var size: CGSize
+        var scale: CGFloat
+        var regions: [CGRect]
+    }
+
+    static func captureFrame(scene: UIWindowScene?, redaction: AutomaticRedaction, maximumScale: CGFloat) -> Frame? {
         guard let scene = scene ?? activeScene else { return nil }
         let windows = scene.windows
             .filter { !$0.isHidden && $0.alpha > 0.01 && !isSystemWindow($0) }
@@ -96,11 +112,13 @@ public enum ScreenCapture {
     }
 
     static func isSystemWindow(_ window: UIWindow) -> Bool {
+        // Snag's own capture controls never appear in captures.
+        if window is SnagOverlayWindow { return true }
         let name = NSStringFromClass(type(of: window))
         return name.contains("Keyboard") || name.contains("TextEffects") || name.hasPrefix("UIRemote")
     }
 
-    static func render(windows: [UIWindow], bounds: CGRect, scale: CGFloat, redaction: AutomaticRedaction) -> Screenshot? {
+    static func render(windows: [UIWindow], bounds: CGRect, scale: CGFloat, redaction: AutomaticRedaction) -> Frame? {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = true
@@ -117,8 +135,7 @@ public enum ScreenCapture {
             }
             fill(regions, in: context.cgContext)
         }
-        guard let png = image.pngData() else { return nil }
-        return Screenshot(png: png, size: bounds.size, scale: scale, redactedRegions: regions)
+        return Frame(image: image, size: bounds.size, scale: scale, regions: regions)
     }
 
     /// Walks visible views, collecting the on-screen rect of each private one.

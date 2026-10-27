@@ -169,3 +169,7 @@ details .context { margin-top: 8px; }
   .issues li > a { grid-template-columns: 40px 1fr; }
   .issues .meta { grid-column: 2; }
 }
+
+.media { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.media .shot { margin: 12px 0; flex: 0 1 auto; }
+.media .shot img, .media .shot video { max-height: 520px; max-width: min(100%, 320px); display: block; border-radius: 10px; border: 1px solid var(--line); background: #000; }

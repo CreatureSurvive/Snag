@@ -438,6 +438,8 @@ func trustedContentType(declared, sniffed string) string {
 	case strings.HasPrefix(sniffed, "image/png"), strings.HasPrefix(sniffed, "image/jpeg"),
 		strings.HasPrefix(sniffed, "image/gif"), strings.HasPrefix(sniffed, "image/webp"):
 		return strings.SplitN(sniffed, ";", 2)[0]
+	case strings.HasPrefix(sniffed, "video/mp4"):
+		return "video/mp4"
 	case strings.HasPrefix(sniffed, "text/plain"):
 		if strings.HasPrefix(declared, "application/json") {
 			return "application/json"

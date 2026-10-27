@@ -126,14 +126,21 @@ public final class Snag: Sendable {
         return report
     }
 
-    /// Keeps attachments within `limit` bytes: drops whole files, logs before screenshots, and
-    /// truncates the oldest part of a log when that's enough.
+    /// Keeps attachments within `limit` bytes. Whole files are dropped in this order: logs, other
+    /// files, recordings, screenshots. A log is trimmed from the oldest end when that's enough.
     static func trim(_ attachments: [Attachment], to limit: Int) -> [Attachment] {
         var total = attachments.reduce(0) { $0 + $1.data.count }
         guard total > limit else { return attachments }
         var result = attachments
         let order = result.indices.sorted { lhs, rhs in
-            func rank(_ a: Attachment) -> Int { a.role == .log ? 0 : a.role == .file ? 1 : 2 }
+            func rank(_ a: Attachment) -> Int {
+                switch a.role {
+                case .log: 0
+                case .file: 1
+                case .recording: 2
+                case .screenshot: 3
+                }
+            }
             return rank(result[lhs]) < rank(result[rhs])
         }
         var removed = IndexSet()

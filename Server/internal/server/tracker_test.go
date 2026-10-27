@@ -571,3 +571,32 @@ func TestSlugify(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordingsAreStoredAsVideo(t *testing.T) {
+	srv, store := newTestServer(t, testConfig(t))
+	u := sampleUpload(id1)
+	// The start of an MP4 as AVAssetWriter writes it: an ftyp box with the isom brand.
+	mp4 := append([]byte{0, 0, 0, 0x1c, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 2, 0, 'i', 's', 'o', 'm', 'i', 's', 'o', '2', 'm', 'p', '4', '1'}, make([]byte, 64)...)
+	u.manifest["attachments"] = append(u.manifest["attachments"].([]map[string]any),
+		map[string]any{"id": "A3000000-0000-0000-0000-000000000000", "role": "recording", "filename": "recording.mp4", "contentType": "video/mp4", "size": len(mp4), "part": "attachment2"})
+	u.files["attachment2"] = mp4
+	if rr := post(t, srv, u, testKey); rr.Code != 201 {
+		t.Fatal(rr.Body)
+	}
+	rec, _ := store.Get(id1)
+	video := rec.Files[2]
+	if video.ContentType != "video/mp4" || video.Role != "recording" {
+		t.Fatalf("stored as %+v", video)
+	}
+	page := adminGet(srv, "/p/gelo/issues/1").Body.String()
+	if !strings.Contains(page, `<video controls`) {
+		t.Fatal("no video player")
+	}
+	if !strings.Contains(adminGet(srv, "/").Header().Get("Content-Security-Policy"), "media-src 'self'") {
+		t.Fatal("CSP blocks video")
+	}
+	file := adminGet(srv, "/reports/"+rec.ID+"/files/"+video.Name)
+	if file.Header().Get("Content-Type") != "video/mp4" || !strings.HasPrefix(file.Header().Get("Content-Disposition"), "inline") {
+		t.Fatalf("served as %s %s", file.Header().Get("Content-Type"), file.Header().Get("Content-Disposition"))
+	}
+}

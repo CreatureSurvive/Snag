@@ -1,28 +1,36 @@
+import PhotosUI
 import Snag
 import SwiftUI
 
-/// The report form: kind, description, contact, screenshot (with markup), logs, and a preview of
-/// exactly what will be sent.
+/// Ways the form can leave to capture more, provided by `.snagReporting(...)`.
+public struct SnagCaptureActions {
+    /// Hide the form and show a floating button that captures other screens.
+    public var captureScreens: (() -> Void)?
+    /// Hide the form and record the screen.
+    public var record: (() -> Void)?
+
+    public init(captureScreens: (() -> Void)? = nil, record: (() -> Void)? = nil) {
+        self.captureScreens = captureScreens
+        self.record = record
+    }
+}
+
+/// The report form: kind, description, contact, screenshots (with markup), a recording, logs,
+/// and a preview of exactly what will be sent.
 public struct SnagReportView: View {
     let snag: Snag
     let options: SnagFormOptions
+    let actions: SnagCaptureActions
     let onFinish: () -> Void
 
-    @State private var kind: Report.Kind
-    @State private var title = ""
-    @State private var message = ""
-    @State private var contact: String
-    @State private var screenshot: Screenshot?
-    @State private var annotated: Screenshot?
-    @State private var includeScreenshot: Bool
-    @State private var includeLogs = true
-    @State private var context = ReportContext()
-    @State private var logs: [Attachment] = []
-    @State private var loading = true
+    @State private var draft: ReportDraft
     @State private var phase: Phase = .editing
-    @State private var editingScreenshot = false
+    @State private var editing: ReportDraft.Shot.ID?
     @State private var showingPreview = false
     @State private var composingMail: Report?
+    #if !os(tvOS)
+    @State private var pickedPhotos: [PhotosPickerItem] = []
+    #endif
     @FocusState private var focused: Field?
 
     enum Phase: Equatable {
@@ -33,15 +41,27 @@ public struct SnagReportView: View {
 
     enum Field { case title, message, contact }
 
+    /// A standalone form.
     /// - Parameter screenshot: Usually from ``ScreenCapture``, taken before the form appeared.
     public init(snag: Snag, screenshot: Screenshot? = nil, options: SnagFormOptions = SnagFormOptions(), onFinish: @escaping () -> Void) {
+        let draft = Self.makeDraft(options: options)
+        if let screenshot { draft.add(screenshot) }
+        self.init(snag: snag, draft: draft, options: options, onFinish: onFinish)
+    }
+
+    /// A form editing `draft`, which survives leaving the form to capture more.
+    public init(snag: Snag, draft: ReportDraft, options: SnagFormOptions = SnagFormOptions(),
+                actions: SnagCaptureActions = SnagCaptureActions(), onFinish: @escaping () -> Void) {
         self.snag = snag
         self.options = options
+        self.actions = actions
         self.onFinish = onFinish
-        _kind = State(initialValue: options.kinds.first?.kind ?? .bug)
-        _contact = State(initialValue: options.contact ?? UserDefaults.standard.string(forKey: Self.contactKey) ?? "")
-        _screenshot = State(initialValue: screenshot)
-        _includeScreenshot = State(initialValue: screenshot != nil)
+        _draft = State(initialValue: draft)
+    }
+
+    public static func makeDraft(options: SnagFormOptions) -> ReportDraft {
+        ReportDraft(kind: options.kinds.first?.kind ?? .bug,
+                    contact: options.contact ?? UserDefaults.standard.string(forKey: contactKey) ?? "")
     }
 
     static let contactKey = "Snag.contact"
@@ -60,22 +80,22 @@ public struct SnagReportView: View {
             #endif
             .toolbar { toolbar }
             #if !os(tvOS)
-            .navigationDestination(isPresented: $editingScreenshot) {
-                if let screenshot {
-                    AnnotationEditor(screenshot: screenshot) { result in
-                        annotated = result
-                        editingScreenshot = false
+            .navigationDestination(item: $editing) { id in
+                if let shot = draft.shots.first(where: { $0.id == id }) {
+                    AnnotationEditor(screenshot: shot.original) { result in
+                        if let index = draft.shots.firstIndex(where: { $0.id == id }) { draft.shots[index].edited = result }
+                        editing = nil
                     } onCancel: {
-                        editingScreenshot = false
+                        editing = nil
                     }
                 }
             }
             #endif
             .navigationDestination(isPresented: $showingPreview) {
-                SnagPreviewView(report: snag.prepare(makeReport()))
+                SnagPreviewView(report: snag.prepare(draft.report(tags: options.tags)))
             }
         }
-        .task { await load() }
+        .task { if draft.loading { await load() } }
         #if canImport(MessageUI) || os(macOS)
         .mailComposer(report: $composingMail, recipient: options.emailRecipient) { sent in
             if sent { phase = .sent(delivered: true) }
@@ -86,7 +106,7 @@ public struct SnagReportView: View {
 
     private var hasDraft: Bool {
         if case .sent = phase { return false }
-        return !message.isEmpty || !title.isEmpty
+        return draft.hasContent
     }
 
     // MARK: - Form
@@ -95,7 +115,7 @@ public struct SnagReportView: View {
         Form {
             if options.kinds.count > 1 {
                 Section {
-                    Picker("Type", selection: $kind) {
+                    Picker("Type", selection: $draft.kind) {
                         ForEach(options.kinds) { option in
                             Label(option.title, systemImage: option.systemImage).tag(option.kind)
                         }
@@ -111,12 +131,12 @@ public struct SnagReportView: View {
             }
 
             Section {
-                TextField("Summary", text: $title)
+                TextField("Summary", text: $draft.title)
                     .focused($focused, equals: .title)
                     .submitLabel(.next)
                     .onSubmit { focused = .message }
                     .accessibilityIdentifier("snag.title")
-                TextField(messagePlaceholder, text: $message, axis: .vertical)
+                TextField(messagePlaceholder, text: $draft.message, axis: .vertical)
                     .lineLimit(4...12)
                     .focused($focused, equals: .message)
                     .accessibilityIdentifier("snag.message")
@@ -128,7 +148,7 @@ public struct SnagReportView: View {
 
             if options.asksForContact {
                 Section {
-                    TextField("Email (optional)", text: $contact)
+                    TextField("Email (optional)", text: $draft.contact)
                         .focused($focused, equals: .contact)
                         .textContentType(.emailAddress)
                         #if os(iOS) || os(visionOS)
@@ -142,34 +162,13 @@ public struct SnagReportView: View {
                 }
             }
 
-            Section {
-                if let shown = annotated ?? screenshot {
-                    screenshotRow(shown)
-                }
-                Toggle("Include logs", isOn: $includeLogs)
-                    .disabled(logs.isEmpty)
-                    .accessibilityIdentifier("snag.includeLogs")
-                Button {
-                    showingPreview = true
-                } label: {
-                    HStack {
-                        Label("What's included", systemImage: "doc.text.magnifyingglass")
-                        Spacer()
-                        if loading { ProgressView() }
-                    }
-                }
-                .accessibilityIdentifier("snag.preview")
-            } header: {
-                Text("Attachments")
-            } footer: {
-                Text("Passwords, tokens and areas marked private are removed before anything is saved.")
-            }
+            attachmentsSection
 
             #if !os(tvOS)
             if canEmail, !snag.configuration.sinks.isEmpty {
                 Section {
-                    Button("Send by Email Instead") { composingMail = snag.prepare(makeReport()) }
-                        .disabled(!canSend || loading)
+                    Button("Send by Email Instead") { composingMail = snag.prepare(draft.report(tags: options.tags)) }
+                        .disabled(!canSend || draft.loading)
                 }
             }
             #endif
@@ -177,43 +176,179 @@ public struct SnagReportView: View {
         .disabled(phase == .sending)
     }
 
-    private var messagePlaceholder: String {
-        switch kind {
-        case .bug: "What happened? What did you expect?"
-        case .featureRequest: "What would you like to see?"
-        default: "Tell us more"
+    private var attachmentsSection: some View {
+        Section {
+            if !draft.shots.isEmpty {
+                shotStrip
+            }
+            #if os(iOS)
+            if let recording = draft.recording {
+                recordingRow(recording)
+            }
+            #endif
+            addButtons
+            Toggle("Include logs", isOn: $draft.includeLogs)
+                .disabled(draft.logs.isEmpty)
+                .accessibilityIdentifier("snag.includeLogs")
+            Button {
+                showingPreview = true
+            } label: {
+                HStack {
+                    Label("What's included", systemImage: "doc.text.magnifyingglass")
+                    Spacer()
+                    if draft.loading { ProgressView() }
+                }
+            }
+            .accessibilityIdentifier("snag.preview")
+        } header: {
+            Text("Attachments")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                let hidden = draft.redactedAreaCount
+                if hidden > 0 {
+                    Text(hidden == 1 ? "1 private area hidden in screenshots." : "\(hidden) private areas hidden in screenshots.")
+                }
+                Text("Passwords, tokens and areas marked private are removed before anything is saved.")
+                if draft.shots.contains(where: \.imported) {
+                    Text("Photos you add aren't redacted automatically; use Mark Up → Hide to cover anything private.")
+                }
+            }
         }
     }
 
-    private func screenshotRow(_ shown: Screenshot) -> some View {
-        HStack(alignment: .center, spacing: 14) {
-            Toggle(isOn: $includeScreenshot) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Screenshot")
-                    let hidden = shown.redactedRegions.count
-                    if hidden > 0 {
-                        Text(hidden == 1 ? "1 private area hidden" : "\(hidden) private areas hidden")
+    private var shotStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(Array(draft.shots.enumerated()), id: \.element.id) { index, shot in
+                    VStack(spacing: 6) {
+                        ZStack(alignment: .topTrailing) {
+                            Group {
+                                if let image = shot.current.image {
+                                    image.resizable().scaledToFit()
+                                } else {
+                                    Color.secondary.opacity(0.2)
+                                }
+                            }
+                            .frame(height: 120)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+                            #if !os(tvOS)
+                            Button(role: .destructive) {
+                                withAnimation { draft.remove(shot.id) }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(4)
+                            .accessibilityLabel("Remove screenshot \(index + 1)")
+                            .accessibilityIdentifier("snag.shot.\(index).remove")
+                            #endif
+                        }
+                        #if os(tvOS)
+                        Button("Remove", role: .destructive) { draft.remove(shot.id) }
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                        #else
+                        Button(shot.edited == nil ? "Mark Up" : "Edit") { editing = shot.id }
+                            .font(.caption)
+                            .buttonStyle(.borderless)
+                            .accessibilityIdentifier("snag.shot.\(index).markup")
+                        #endif
                     }
-                    #if !os(tvOS)
-                    Button(annotated == nil ? "Mark Up" : "Edit Markup") { editingScreenshot = true }
-                        .font(.callout)
-                        .buttonStyle(.borderless)
-                        .disabled(!includeScreenshot)
-                        .accessibilityIdentifier("snag.markup")
-                    #endif
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("snag.shot.\(index)")
                 }
             }
-            .accessibilityIdentifier("snag.includeScreenshot")
-            if let image = shown.image {
-                image.resizable().scaledToFit()
-                    .frame(height: 96)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
-                    .opacity(includeScreenshot ? 1 : 0.35)
-                    .accessibilityHidden(true)
+            .padding(.vertical, 6)
+        }
+    }
+
+    #if os(iOS)
+    private func recordingRow(_ recording: Recording) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if let poster = recording.poster?.image {
+                    poster.resizable().scaledToFit()
+                } else {
+                    Color.secondary.opacity(0.2)
+                }
             }
+            .frame(width: 44, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(Image(systemName: "play.fill").foregroundStyle(.white).shadow(radius: 2))
+            VStack(alignment: .leading) {
+                Text("Screen recording")
+                Text("\(Duration.seconds(recording.duration).formatted(.time(pattern: .minuteSecond))) · \(ByteCountFormatter.string(fromByteCount: Int64(recording.data.count), countStyle: .file))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                draft.recording = nil
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove recording")
+            .accessibilityIdentifier("snag.recording.remove")
+        }
+        .accessibilityIdentifier("snag.recording")
+    }
+    #endif
+
+    @ViewBuilder
+    private var addButtons: some View {
+        if let captureScreens = actions.captureScreens, draft.canAddShot {
+            Button {
+                focused = nil
+                captureScreens()
+            } label: {
+                Label(draft.shots.isEmpty ? "Capture a Screen" : "Capture Another Screen", systemImage: "camera.viewfinder")
+            }
+            .accessibilityIdentifier("snag.captureMore")
+        }
+        #if !os(tvOS)
+        if draft.canAddShot {
+            // No photo library access needed: the picker runs out of process and hands back only
+            // what the user picks.
+            PhotosPicker(selection: $pickedPhotos, maxSelectionCount: ReportDraft.maximumShots - draft.shots.count, matching: .images) {
+                Label("Add from Photos", systemImage: "photo.on.rectangle")
+            }
+            .accessibilityIdentifier("snag.addPhotos")
+            .onChange(of: pickedPhotos) { _, items in
+                guard !items.isEmpty else { return }
+                pickedPhotos = []
+                Task {
+                    for item in items {
+                        if let data = try? await item.loadTransferable(type: Data.self),
+                           let shot = ImageImport.screenshot(from: data) {
+                            draft.add(shot, imported: true)
+                        }
+                    }
+                }
+            }
+        }
+        #endif
+        #if os(iOS)
+        if let record = actions.record, draft.recording == nil {
+            Button {
+                focused = nil
+                record()
+            } label: {
+                Label("Record the Problem", systemImage: "record.circle")
+            }
+            .accessibilityIdentifier("snag.record")
+        }
+        #endif
+    }
+
+    private var messagePlaceholder: String {
+        switch draft.kind {
+        case .bug: "What happened? What did you expect?"
+        case .featureRequest: "What would you like to see?"
+        default: "Tell us more"
         }
     }
 
@@ -263,7 +398,8 @@ public struct SnagReportView: View {
     // MARK: - Actions
 
     private var canSend: Bool {
-        let hasText = !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasText = !draft.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return options.requiresMessage ? hasText : true
     }
 
@@ -278,43 +414,27 @@ public struct SnagReportView: View {
     private func load() async {
         async let collectedContext = snag.makeContext()
         async let collectedLogs = snag.collectLogs()
-        context = await collectedContext
-        logs = await collectedLogs
-        includeLogs = !logs.isEmpty
-        loading = false
-    }
-
-    func makeReport() -> Report {
-        var attachments: [Attachment] = []
-        if includeScreenshot, let shot = annotated ?? screenshot { attachments.append(shot.attachment) }
-        if includeLogs { attachments += logs }
-        let trimmedContact = contact.trimmingCharacters(in: .whitespacesAndNewlines)
-        return Report(
-            kind: kind,
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            message: message.trimmingCharacters(in: .whitespacesAndNewlines),
-            contact: trimmedContact.isEmpty ? nil : trimmedContact,
-            tags: options.tags,
-            attachments: attachments,
-            context: context
-        )
+        draft.context = await collectedContext
+        draft.logs = await collectedLogs
+        draft.includeLogs = !draft.logs.isEmpty
+        draft.loading = false
     }
 
     private func send() {
         focused = nil
         if options.asksForContact, options.contact == nil {
-            UserDefaults.standard.set(contact.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.contactKey)
+            UserDefaults.standard.set(draft.contact.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.contactKey)
         }
         if snag.configuration.sinks.isEmpty {
-            if canEmail { composingMail = snag.prepare(makeReport()) }
+            if canEmail { composingMail = snag.prepare(draft.report(tags: options.tags)) }
             else { phase = .failed("No way to send reports is configured.") }
             return
         }
         phase = .sending
         Task {
             // Logs and context may still be loading; build the report once they're in.
-            while loading { try? await Task.sleep(for: .milliseconds(50)) }
-            let report = makeReport()
+            while draft.loading { try? await Task.sleep(for: .milliseconds(50)) }
+            let report = draft.report(tags: options.tags)
             let events = await snag.outbox.events()
             do {
                 let submitted = try await snag.submit(report)

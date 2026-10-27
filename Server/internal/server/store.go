@@ -81,6 +81,7 @@ type ForwardState struct {
 }
 
 func (f StoredFile) IsImage() bool { return strings.HasPrefix(f.ContentType, "image/") }
+func (f StoredFile) IsVideo() bool { return f.ContentType == "video/mp4" }
 func (f StoredFile) IsText() bool {
 	return strings.HasPrefix(f.ContentType, "text/") || strings.HasPrefix(f.ContentType, "application/json")
 }

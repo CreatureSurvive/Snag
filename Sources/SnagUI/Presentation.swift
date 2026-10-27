@@ -43,20 +43,24 @@ extension View {
     }
 }
 
-struct Presentation: Identifiable {
-    let id = UUID()
-    let screenshot: Screenshot?
-}
-
 struct SnagReportingModifier: ViewModifier {
     let snag: Snag?
     let triggers: SnagTriggers
     let options: SnagFormOptions
 
-    @State private var presentation: Presentation?
+    /// The report in progress, kept while the form is hidden for capturing.
+    @State private var draft: ReportDraft?
+    /// The draft the form is showing; nil while hidden.
+    @State private var presented: ReportDraft?
+    /// Runs after the form finishes dismissing (to capture without the sheet in the way).
+    @State private var afterDismiss: (() -> Void)?
     @State private var askingAboutScreenshot = false
     #if canImport(UIKit)
     @State private var window: UIWindow?
+    #endif
+    #if os(iOS)
+    @State private var overlay: CaptureOverlay?
+    @State private var recorder: ScreenRecorder?
     #endif
 
     func body(content: Content) -> some View {
@@ -65,10 +69,17 @@ struct SnagReportingModifier: ViewModifier {
             #if canImport(UIKit)
             .background(WindowReader(window: $window))
             #endif
-            .sheet(item: $presentation) { presentation in
+            .sheet(item: $presented, onDismiss: {
+                if let action = afterDismiss {
+                    afterDismiss = nil
+                    action()
+                } else {
+                    draft = nil // dismissed for good (Cancel, Done, or swiped away)
+                }
+            }) { draft in
                 if let snag = snag ?? Snag.shared {
-                    SnagReportView(snag: snag, screenshot: presentation.screenshot, options: options) {
-                        self.presentation = nil
+                    SnagReportView(snag: snag, draft: draft, options: options, actions: captureActions) {
+                        presented = nil
                     }
                     #if os(macOS)
                     .frame(minWidth: 480, idealWidth: 540, minHeight: 560, idealHeight: 680)
@@ -98,24 +109,112 @@ struct SnagReportingModifier: ViewModifier {
     #if canImport(UIKit)
     /// Only the key window's scene responds, so an iPad with two scenes opens one form.
     private var isFrontmost: Bool {
-        guard presentation == nil else { return false }
+        guard draft == nil else { return false }
         guard let window else { return true }
         return window.isKeyWindow && window.windowScene?.activationState == .foregroundActive
     }
     #endif
 
-    private func present(includeScreenshot: Bool) {
-        guard presentation == nil else { return }
-        var screenshot: Screenshot?
-        if includeScreenshot {
-            #if canImport(UIKit)
-            screenshot = ScreenCapture.capture(scene: window?.windowScene, redaction: options.redaction)
-            #else
-            screenshot = ScreenCapture.capture(redaction: options.redaction)
-            #endif
-        }
-        presentation = Presentation(screenshot: screenshot)
+    private func capture() -> Screenshot? {
+        #if canImport(UIKit)
+        ScreenCapture.capture(scene: window?.windowScene ?? ScreenCapture.activeScene, redaction: options.redaction)
+        #else
+        ScreenCapture.capture(redaction: options.redaction)
+        #endif
     }
+
+    private func present(includeScreenshot: Bool) {
+        guard draft == nil else { return }
+        let draft = SnagReportView.makeDraft(options: options)
+        if includeScreenshot, let shot = capture() { draft.add(shot) }
+        self.draft = draft
+        presented = draft
+    }
+
+    private var captureActions: SnagCaptureActions {
+        #if os(iOS)
+        return SnagCaptureActions(
+            captureScreens: { leaveForm { startCapturing() } },
+            record: { leaveForm { startRecording() } }
+        )
+        #else
+        return SnagCaptureActions()
+        #endif
+    }
+
+    private func leaveForm(then action: @escaping () -> Void) {
+        afterDismiss = action
+        presented = nil
+    }
+
+    #if os(iOS)
+    private func returnToForm() {
+        overlay?.hide()
+        overlay = nil
+        recorder = nil
+        presented = draft
+    }
+
+    /// The scene to capture, looked up when needed (state read inside the sheet can be stale).
+    private var scene: UIWindowScene? { window?.windowScene ?? ScreenCapture.activeScene }
+
+    private func startCapturing() {
+        guard let scene, let draft else { return }
+        let model = CaptureOverlayModel(mode: .capture)
+        model.count = draft.shots.count
+        model.onCapture = {
+            guard draft.canAddShot, let shot = capture() else { return }
+            draft.add(shot)
+            model.count = draft.shots.count
+            model.flash = true
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                model.flash = false
+            }
+        }
+        model.onDone = { returnToForm() }
+        let overlay = CaptureOverlay(model: model)
+        overlay.show(in: scene)
+        self.overlay = overlay
+    }
+
+    private func startRecording() {
+        guard let scene, let draft else { return }
+        let model = CaptureOverlayModel(mode: .recordReady)
+        let recorder = ScreenRecorder(scene: scene, redaction: options.redaction)
+        model.maximum = recorder.maximumDuration
+        var ticker: Timer?
+        let finish: () -> Void = {
+            ticker?.invalidate()
+            Task { @MainActor in
+                if let recording = await recorder.stop() { draft.recording = recording }
+                returnToForm()
+            }
+        }
+        model.onStartRecording = {
+            do {
+                try recorder.start()
+                model.mode = .recording
+                ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+                    MainActor.assumeIsolated { model.elapsed = recorder.elapsed }
+                }
+            } catch {
+                returnToForm()
+            }
+        }
+        recorder.onLimit = finish
+        model.onStopRecording = finish
+        model.onDone = {
+            recorder.cancel()
+            returnToForm()
+        }
+        let overlay = CaptureOverlay(model: model)
+        overlay.show(in: scene)
+        self.overlay = overlay
+        self.recorder = recorder
+    }
+    #endif
 }
 
 #if canImport(UIKit)

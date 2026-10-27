@@ -81,7 +81,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	},
 }).ParseFS(webFS, "web/*.html"))
 
-const dashboardCSP = "default-src 'none'; img-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+const dashboardCSP = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 
 func (s *Server) render(w http.ResponseWriter, name string, data map[string]any) {
 	data["CSRF"] = s.csrfToken()
@@ -547,7 +547,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	disposition := "attachment"
-	if file.IsImage() || (file.IsText() && r.URL.Query().Get("download") == "") {
+	if file.IsImage() || file.IsVideo() || (file.IsText() && r.URL.Query().Get("download") == "") {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Type", file.ContentType)
