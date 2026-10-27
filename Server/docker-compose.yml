@@ -9,16 +9,24 @@ services:
     volumes:
       - snag-data:/data
     environment:
-      # Required: one or more ingest keys (app:key, comma-separated). Generate with: openssl rand -hex 24
-      SNAG_API_KEYS: ${SNAG_API_KEYS:?set SNAG_API_KEYS in .env}
-      # Dashboard login (user "admin"). Leave unset to disable the dashboard.
-      SNAG_ADMIN_PASSWORD: ${SNAG_ADMIN_PASSWORD:-}
+      # Dashboard login (user "admin"). Create projects and their ingest keys there.
+      SNAG_ADMIN_PASSWORD: ${SNAG_ADMIN_PASSWORD:?set SNAG_ADMIN_PASSWORD in .env}
+      # Optional: projects from config (app:key,app2:key2) and/or a projects file.
+      SNAG_API_KEYS: ${SNAG_API_KEYS:-}
+      SNAG_PROJECTS_FILE: ${SNAG_PROJECTS_FILE:-}
       # The URL people use to reach this server; used for links in forwarded reports.
       SNAG_PUBLIC_URL: ${SNAG_PUBLIC_URL:-}
       # Set to true behind a reverse proxy so rate limiting sees real client IPs.
       SNAG_TRUST_PROXY: ${SNAG_TRUST_PROXY:-false}
       SNAG_RETENTION_DAYS: ${SNAG_RETENTION_DAYS:-0}
-      # Forwarding (all optional)
+      # GitHub (default token for projects; webhook secret enables two-way sync webhooks)
+      SNAG_GITHUB_WEBHOOK_SECRET: ${SNAG_GITHUB_WEBHOOK_SECRET:-}
+      # Notifications (defaults for projects from SNAG_API_KEYS)
+      SNAG_NTFY_URL: ${SNAG_NTFY_URL:-}
+      SNAG_PUSHOVER_USER: ${SNAG_PUSHOVER_USER:-}
+      SNAG_PUSHOVER_TOKEN: ${SNAG_PUSHOVER_TOKEN:-}
+      SNAG_SMTP_REPLY_TO: ${SNAG_SMTP_REPLY_TO:-}
+      # Forwarding defaults for projects from SNAG_API_KEYS (all optional)
       SNAG_GITHUB_TOKEN: ${SNAG_GITHUB_TOKEN:-}
       SNAG_GITHUB_REPO: ${SNAG_GITHUB_REPO:-}
       SNAG_GITHUB_ATTACHMENT_BRANCH: ${SNAG_GITHUB_ATTACHMENT_BRANCH:-}
