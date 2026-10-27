@@ -26,6 +26,7 @@ type Project struct {
 	Keys       []APIKey          `json:"keys,omitempty"`
 	Forwarding ProjectForwarding `json:"forwarding"`
 	Notify     NotifyConfig      `json:"notify"`
+	Attest     AttestConfig      `json:"attest"`
 	// GroupDuplicates files a report with identical title and message (and the same app
 	// version) under the existing open issue instead of opening a new one.
 	GroupDuplicates bool `json:"groupDuplicates"`
@@ -116,6 +117,7 @@ type ProjectSeed struct {
 	Keys            []string          `json:"keys"`
 	Forwarding      ProjectForwarding `json:"forwarding"`
 	Notify          *NotifyConfig     `json:"notify,omitempty"`
+	Attest          *AttestConfig     `json:"attest,omitempty"`
 	GroupDuplicates *bool             `json:"groupDuplicates,omitempty"`
 }
 
@@ -157,6 +159,9 @@ func OpenProjects(dataDir string, seeds []ProjectSeed) (*ProjectStore, error) {
 			}
 			if seed.Notify != nil {
 				p.Notify = *seed.Notify
+			}
+			if seed.Attest != nil {
+				p.Attest = *seed.Attest
 			}
 			ps.projects[slug] = p
 			changed = true

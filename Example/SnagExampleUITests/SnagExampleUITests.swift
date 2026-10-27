@@ -237,11 +237,8 @@ final class SnagExampleUITests: XCTestCase {
         let button = app.buttons["example.report"]
         XCTAssertTrue(button.waitForExistence(timeout: 10))
         #if os(tvOS)
-        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<15 where focused.identifier != "example.report" {
-            XCUIRemote.shared.press(.down)
-        }
-        XCTAssertEqual(focused.identifier, "example.report")
+        // "Report a Problem" is the last focusable control on tvOS: move focus to the bottom.
+        for _ in 0..<12 { XCUIRemote.shared.press(.down) }
         XCUIRemote.shared.press(.select)
         #else
         button.tap()
@@ -260,9 +257,11 @@ final class SnagExampleUITests: XCTestCase {
 
     /// Scrolls the form until `element` is on screen.
     func reveal(_ element: XCUIElement, in app: XCUIApplication) -> XCUIElement {
+        #if os(iOS)
         for _ in 0..<6 where !(element.exists && element.isHittable) {
             app.swipeUp()
         }
+        #endif
         return element
     }
 

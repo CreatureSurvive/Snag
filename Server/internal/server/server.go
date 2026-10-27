@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,7 @@ type Server struct {
 	forwarder *Dispatcher
 	notifier  *Notifier
 	github    *GitHubSync
+	attestor  *Attestor
 	log       *slog.Logger
 	limiter   *rateLimiter
 	csrfKey   []byte
@@ -55,9 +57,14 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	attestor, err := NewAttestor(cfg.DataDir, nil)
+	if err != nil {
+		return nil, err
+	}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
 	s := &Server{
+		attestor: attestor,
 		cfg:      cfg,
 		store:    store,
 		projects: projects,
@@ -154,6 +161,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
 	s.mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
+	s.mux.HandleFunc("POST /api/v1/attest/challenge", s.handleAttestChallenge)
+	s.mux.HandleFunc("POST /api/v1/attest/keys", s.handleAttestKey)
 	s.mux.HandleFunc("GET /api/v1/followup/{id}", s.handleFollowUp)
 	s.mux.HandleFunc("POST /api/v1/followup/{id}/messages", s.handleFollowUpReply)
 	s.mux.HandleFunc("GET /api/v1/projects", s.admin(s.handleAPIProjects))
@@ -251,7 +260,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusTooManyRequests, "too many reports from this address; try again later")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxUploadBytes)
+	limited := http.MaxBytesReader(w, r.Body, s.cfg.MaxUploadBytes)
+	// The body's hash is what an App Attest assertion signs.
+	bodyHash := sha256.New()
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.TeeReader(limited, bodyHash), limited}
 	reader, err := r.MultipartReader()
 	if err != nil {
 		fail(w, http.StatusBadRequest, "expected multipart/form-data")
@@ -327,6 +342,26 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "missing report part")
 		return
 	}
+	_, _ = io.Copy(io.Discard, r.Body) // the epilogue counts toward the hash
+	attested, attestErr := false, error(nil)
+	if project.Attest.Mode != AttestOff {
+		keyID := r.Header.Get("X-Snag-Attest-Key")
+		assertion, decodeErr := base64.StdEncoding.DecodeString(r.Header.Get("X-Snag-Assertion"))
+		switch {
+		case keyID == "":
+			attestErr = errors.New("no App Attest assertion")
+		case decodeErr != nil:
+			attestErr = errors.New("assertion isn't base64")
+		default:
+			attestErr = s.attestor.VerifyAssertion(project, keyID, assertion, bodyHash.Sum(nil))
+		}
+		attested = attestErr == nil
+		if !attested && project.Attest.Mode == AttestRequire {
+			s.log.Warn("unattested report rejected", "project", project.Slug, "err", attestErr)
+			fail(w, http.StatusForbidden, "this project only accepts reports from verified devices: %v", attestErr)
+			return
+		}
+	}
 	if err := validateManifest(manifest); err != nil {
 		fail(w, http.StatusBadRequest, "%v", err)
 		return
@@ -336,6 +371,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		Manifest:   *manifest,
 		ReceivedAt: time.Now().UTC(),
 		Project:    project.Slug,
+		Attested:   attested,
 		RemoteAddr: ip,
 		UserAgent:  truncate(r.UserAgent(), 200),
 	}

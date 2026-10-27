@@ -778,6 +778,22 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		n.OnReport = r.FormValue("onReport") == "on"
 		n.OnPriority = r.FormValue("onPriority") == "on"
 		n.Kinds = splitList(r.FormValue("notifyKinds"))
+		switch mode := r.FormValue("attestMode"); mode {
+		case AttestOff, AttestMonitor, AttestRequire:
+			p.Attest.Mode = mode
+		default:
+			return errors.New("unknown App Attest mode")
+		}
+		p.Attest.AppIDs = splitList(r.FormValue("attestAppIDs"))
+		p.Attest.AllowDevelopment = r.FormValue("attestDevelopment") == "on"
+		for _, id := range p.Attest.AppIDs {
+			if team, bundle, ok := strings.Cut(id, "."); !ok || len(team) != 10 || bundle == "" {
+				return fmt.Errorf("%q isn't an app ID; use TEAMID.bundle.id", id)
+			}
+		}
+		if p.Attest.Mode != AttestOff && len(p.Attest.AppIDs) == 0 {
+			return errors.New("App Attest needs at least one app ID")
+		}
 		if n.Ntfy != "" {
 			if u, err := url.Parse(n.Ntfy); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 				return errors.New("the ntfy topic must be a URL like https://ntfy.sh/your-topic")

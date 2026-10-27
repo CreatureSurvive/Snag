@@ -63,6 +63,8 @@ type Record struct {
 	UserAgent  string                   `json:"userAgent,omitempty"`
 	// ReaderTokenHash lets the reporter's app read this report's status and thread.
 	ReaderTokenHash string `json:"readerTokenHash,omitempty"`
+	// Attested is true when the upload carried a valid App Attest assertion.
+	Attested bool `json:"attested,omitempty"`
 }
 
 type StoredFile struct {

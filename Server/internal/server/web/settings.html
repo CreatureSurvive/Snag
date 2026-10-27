@@ -79,6 +79,20 @@
     <label class="check"><input type="checkbox" name="onReport" {{if .P.Notify.OnReport}}checked{{end}}> Any new report, including duplicates</label>
     <label>Only these kinds <input name="notifyKinds" value="{{join .P.Notify.Kinds ", "}}" placeholder="all kinds (or e.g. bug, crash)"></label>
   </fieldset>
+  <h2>Device verification (App Attest)</h2>
+  <p class="hint">Ingest keys ship inside your app, so anyone can extract one. App Attest proves a report came from your genuine app on a real Apple device. The simulator can't attest; use “Verify and mark” while testing.</p>
+  <fieldset>
+    <legend>Policy</legend>
+    <label>Mode
+      <select name="attestMode">
+        <option value="" {{if eq .P.Attest.Mode ""}}selected{{end}}>Off</option>
+        <option value="monitor" {{if eq .P.Attest.Mode "monitor"}}selected{{end}}>Verify and mark reports</option>
+        <option value="require" {{if eq .P.Attest.Mode "require"}}selected{{end}}>Require verified devices</option>
+      </select>
+    </label>
+    <label>App IDs <input name="attestAppIDs" value="{{join .P.Attest.AppIDs ", "}}" placeholder="TEAMID.com.example.app, TEAMID.com.example.app.tv"></label>
+    <label class="check"><input type="checkbox" name="attestDevelopment" {{if .P.Attest.AllowDevelopment}}checked{{end}}> Accept development builds (run from Xcode)</label>
+  </fieldset>
   <button type="submit" class="primary">Save settings</button>
 </form>
 

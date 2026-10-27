@@ -35,7 +35,12 @@ struct LiveServerTests {
         }
         let reference = try #require(receipt?.reference)
         #expect(reference == submitted.id.uuidString.lowercased())
-        #expect(receipt?.url?.absoluteString.hasSuffix("/reports/\(reference)") == true)
+        let issueURL = try #require(receipt?.url)
+        #expect(issueURL.path.hasPrefix("/p/live/issues/"))
+        #expect(receipt?.followUp != nil)
+        #expect(await snag.inbox.entry(submitted.id)?.followUp != nil, "the inbox can follow it")
+        await snag.inbox.refresh()
+        #expect(await snag.inbox.entry(submitted.id)?.status?.state == .received)
 
         let (data, status) = try await admin("api/v1/reports/\(reference)")
         #expect(status == 200)
@@ -49,7 +54,7 @@ struct LiveServerTests {
         // Sending the same report again doesn't duplicate it.
         let again = try await sink.send(submitted)
         #expect(again.reference == reference)
-        let (page, pageStatus) = try await admin("reports/\(reference)")
+        let (page, pageStatus) = try await admin(String(issueURL.path.dropFirst()))
         #expect(pageStatus == 200)
         #expect(String(decoding: page, as: UTF8.self).contains(report.title))
     }
