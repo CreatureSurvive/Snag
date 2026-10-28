@@ -59,8 +59,8 @@ public struct SnagInboxView: View {
     public var body: some View {
         List {
             if model.entries.isEmpty {
-                ContentUnavailableView("No Reports", systemImage: "tray",
-                                       description: Text("Problems you report appear here, with replies from the developer."))
+                ContentUnavailableView(localized("No Reports"), systemImage: "tray",
+                                       description: Text(localized("Problems you report appear here, with replies from the developer.")))
             }
             ForEach(model.entries) { entry in
                 NavigationLink {
@@ -71,7 +71,7 @@ public struct SnagInboxView: View {
                 .accessibilityIdentifier("snag.inbox.\(entry.id.uuidString)")
             }
         }
-        .navigationTitle("My Reports")
+        .navigationTitle(localized("My Reports"))
         .refreshable { await model.refresh() }
         .task { await model.refresh() }
     }
@@ -91,13 +91,13 @@ public struct SnagInboxView: View {
             }
             Spacer()
             if entry.unread > 0 {
-                Text("\(entry.unread)")
+                Text(entry.unread, format: .number)
                     .font(.caption.bold())
                     .foregroundStyle(.white)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(.tint, in: Capsule())
-                    .accessibilityLabel("\(entry.unread) new replies")
+                    .accessibilityLabel(localized("\(entry.unread) new replies"))
             }
         }
         .padding(.vertical, 2)
@@ -109,11 +109,13 @@ struct StatusBadge: View {
 
     var body: some View {
         let (label, color): (String, Color) = switch status?.state {
-        case .inProgress: (status!.label, .orange)
-        case .fixed: (status!.label, .green)
-        case .closed: (status!.label, .secondary)
-        case .received: (status!.label, .blue)
-        case nil: ("Sent", .secondary)
+        case .inProgress: (localized("Being worked on"), .orange)
+        case .fixed:
+            if let version = status?.fixedIn, !version.isEmpty { (localized("Fixed in \(version)"), .green) }
+            else { (localized("Fixed"), .green) }
+        case .closed: (localized("Closed"), .secondary)
+        case .received: (localized("Received"), .blue)
+        case nil: (localized("Sent"), .secondary)
         }
         Text(label)
             .font(.caption.weight(.semibold))
@@ -153,7 +155,7 @@ struct SnagReportThreadView: View {
                                 .id(message.id)
                         }
                         if !entry.canReply {
-                            Text(entry.status == nil ? "Replies appear here once the report reaches the developer." : "This report can no longer receive replies.")
+                            Text(entry.status == nil ? localized("Replies appear here once the report reaches the developer.") : localized("This report can no longer receive replies."))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -169,7 +171,7 @@ struct SnagReportThreadView: View {
         #if !os(tvOS)
         .safeAreaInset(edge: .bottom) { composer }
         #endif
-        .navigationTitle(entry?.title.isEmpty == false ? entry!.title : "Report")
+        .navigationTitle(entry?.title.isEmpty == false ? entry!.title : localized("Report"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -205,7 +207,7 @@ struct SnagReportThreadView: View {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
                 HStack(alignment: .bottom) {
-                    TextField("Reply", text: $reply, axis: .vertical)
+                    TextField(localized("Reply"), text: $reply, axis: .vertical)
                         .lineLimit(1...5)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("snag.thread.reply")
@@ -215,7 +217,7 @@ struct SnagReportThreadView: View {
                         Image(systemName: "arrow.up.circle.fill").font(.title2)
                     }
                     .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
-                    .accessibilityLabel("Send reply")
+                    .accessibilityLabel(localized("Send reply"))
                     .accessibilityIdentifier("snag.thread.send")
                 }
             }
@@ -234,7 +236,7 @@ struct SnagReportThreadView: View {
                 try await model.inbox.reply(to: id, text: text)
                 reply = ""
             } catch {
-                self.error = "Couldn't send. Check your connection and try again."
+                self.error = localized("Couldn't send. Check your connection and try again.")
             }
             sending = false
         }

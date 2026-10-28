@@ -18,6 +18,16 @@ public enum Annotation: Sendable, Hashable {
 public enum AnnotationColor: String, Sendable, Hashable, CaseIterable {
     case red, yellow, green, blue, white
 
+    var name: String {
+        switch self {
+        case .red: localized("Red")
+        case .yellow: localized("Yellow")
+        case .green: localized("Green")
+        case .blue: localized("Blue")
+        case .white: localized("White")
+        }
+    }
+
     var cgColor: CGColor {
         switch self {
         case .red: CGColor(srgbRed: 0.96, green: 0.26, blue: 0.27, alpha: 1)

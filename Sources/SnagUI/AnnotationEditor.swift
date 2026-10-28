@@ -8,11 +8,11 @@ public struct AnnotationEditor: View {
         case pen, box, redact
         public var id: String { rawValue }
 
-        var label: LocalizedStringKey {
+        var label: String {
             switch self {
-            case .pen: "Draw"
-            case .box: "Highlight"
-            case .redact: "Hide"
+            case .pen: localized("Draw")
+            case .box: localized("Highlight")
+            case .redact: localized("Hide")
             }
         }
 
@@ -50,16 +50,16 @@ public struct AnnotationEditor: View {
                 .background(Color.black.opacity(0.92))
             toolbar
         }
-        .navigationTitle("Mark Up")
+        .navigationTitle(localized("Mark Up"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel", action: onCancel)
+                Button(localized("Cancel"), action: onCancel)
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
+                Button(localized("Done")) {
                     onDone(AnnotationRenderer.flatten(screenshot, annotations: annotations) ?? screenshot)
                 }
                 .accessibilityIdentifier("snag.annotate.done")
@@ -88,15 +88,15 @@ public struct AnnotationEditor: View {
             .shadow(color: .black.opacity(0.4), radius: 8)
             .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             .accessibilityElement()
-            .accessibilityLabel("Screenshot")
-            .accessibilityHint("Drag to draw on the screenshot")
+            .accessibilityLabel(localized("Screenshot"))
+            .accessibilityHint(localized("Drag to draw on the screenshot"))
             .accessibilityIdentifier("snag.annotate.canvas")
         }
     }
 
     private var toolbar: some View {
         VStack(spacing: 10) {
-            Picker("Tool", selection: $tool) {
+            Picker(localized("Tool"), selection: $tool) {
                 ForEach(Tool.allCases) { tool in
                     Label(tool.label, systemImage: tool.symbol).tag(tool)
                 }
@@ -113,9 +113,11 @@ public struct AnnotationEditor: View {
                             .fill(option.color)
                             .frame(width: 26, height: 26)
                             .overlay(Circle().strokeBorder(Color.primary, lineWidth: color == option ? 2.5 : 0).padding(-4))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(option.rawValue.capitalized)
+                    .accessibilityLabel(option.name)
                     .accessibilityAddTraits(color == option ? .isSelected : [])
                 }
                 .opacity(tool == .redact ? 0.3 : 1)
@@ -124,7 +126,7 @@ public struct AnnotationEditor: View {
                 Button {
                     _ = annotations.popLast()
                 } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
+                    Label(localized("Undo"), systemImage: "arrow.uturn.backward")
                 }
                 .disabled(annotations.isEmpty)
                 .labelStyle(.iconOnly)
@@ -132,7 +134,7 @@ public struct AnnotationEditor: View {
                 Button(role: .destructive) {
                     annotations.removeAll()
                 } label: {
-                    Label("Clear", systemImage: "trash")
+                    Label(localized("Clear"), systemImage: "trash")
                 }
                 .disabled(annotations.isEmpty)
                 .labelStyle(.iconOnly)

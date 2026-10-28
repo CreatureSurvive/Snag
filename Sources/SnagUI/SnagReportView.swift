@@ -32,6 +32,7 @@ public struct SnagReportView: View {
     @State private var pickedPhotos: [PhotosPickerItem] = []
     #endif
     @FocusState private var focused: Field?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     enum Phase: Equatable {
         case editing, sending
@@ -115,7 +116,7 @@ public struct SnagReportView: View {
         Form {
             if options.kinds.count > 1 {
                 Section {
-                    Picker("Type", selection: $draft.kind) {
+                    Picker(localized("Report type"), selection: $draft.kind) {
                         ForEach(options.kinds) { option in
                             Label(option.title, systemImage: option.systemImage).tag(option.kind)
                         }
@@ -131,10 +132,14 @@ public struct SnagReportView: View {
             }
 
             Section {
-                TextField("Summary", text: $draft.title)
+                // Vertical so long placeholders wrap at large text sizes; Return moves on.
+                TextField(localized("Summary"), text: $draft.title, axis: .vertical)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2...4 : 1...3)
                     .focused($focused, equals: .title)
                     .submitLabel(.next)
-                    .onSubmit { focused = .message }
+                    .onChange(of: draft.title) { _, value in
+                        if value.contains(where: \.isNewline) { draft.title = value.filter { !$0.isNewline }; focused = .message }
+                    }
                     .accessibilityIdentifier("snag.title")
                 TextField(messagePlaceholder, text: $draft.message, axis: .vertical)
                     .lineLimit(4...12)
@@ -148,7 +153,12 @@ public struct SnagReportView: View {
 
             if options.asksForContact {
                 Section {
-                    TextField("Email (optional)", text: $draft.contact)
+                    // Vertical so the placeholder wraps at the largest text sizes.
+                    TextField(localized("Email (optional)"), text: $draft.contact, axis: .vertical)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2...4 : 1...3)
+                        .onChange(of: draft.contact) { _, value in
+                            if value.contains(where: \.isNewline) { draft.contact = value.filter { !$0.isNewline }; focused = nil }
+                        }
                         .focused($focused, equals: .contact)
                         .textContentType(.emailAddress)
                         #if os(iOS) || os(visionOS)
@@ -158,7 +168,7 @@ public struct SnagReportView: View {
                         .autocorrectionDisabled()
                         .accessibilityIdentifier("snag.contact")
                 } footer: {
-                    Text("Only used to follow up on this report.")
+                    Text(localized("Only used to follow up on this report."))
                 }
             }
 
@@ -167,7 +177,7 @@ public struct SnagReportView: View {
             #if !os(tvOS)
             if canEmail, !snag.configuration.sinks.isEmpty {
                 Section {
-                    Button("Send by Email Instead") { composingMail = snag.prepare(draft.report(tags: options.tags)) }
+                    Button(localized("Send by Email Instead")) { composingMail = snag.prepare(draft.report(tags: options.tags)) }
                         .disabled(!canSend || draft.loading)
                 }
             }
@@ -187,30 +197,30 @@ public struct SnagReportView: View {
             }
             #endif
             addButtons
-            Toggle("Include logs", isOn: $draft.includeLogs)
+            Toggle(localized("Include logs"), isOn: $draft.includeLogs)
                 .disabled(draft.logs.isEmpty)
                 .accessibilityIdentifier("snag.includeLogs")
             Button {
                 showingPreview = true
             } label: {
                 HStack {
-                    Label("What's included", systemImage: "doc.text.magnifyingglass")
+                    Label(localized("What's Included"), systemImage: "doc.text.magnifyingglass")
                     Spacer()
                     if draft.loading { ProgressView() }
                 }
             }
             .accessibilityIdentifier("snag.preview")
         } header: {
-            Text("Attachments")
+            Text(localized("Attachments"))
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 let hidden = draft.redactedAreaCount
                 if hidden > 0 {
-                    Text(hidden == 1 ? "1 private area hidden in screenshots." : "\(hidden) private areas hidden in screenshots.")
+                    Text(localized("\(hidden) private areas hidden in screenshots."))
                 }
-                Text("Passwords, tokens and areas marked private are removed before anything is saved.")
+                Text(localized("Passwords, tokens and areas marked private are removed before anything is saved."))
                 if draft.shots.contains(where: \.imported) {
-                    Text("Photos you add aren't redacted automatically; use Mark Up → Hide to cover anything private.")
+                    Text(localized("Photos you add aren't redacted automatically; use Mark Up → Hide to cover anything private."))
                 }
             }
         }
@@ -243,17 +253,22 @@ public struct SnagReportView: View {
                             }
                             .buttonStyle(.plain)
                             .padding(4)
-                            .accessibilityLabel("Remove screenshot \(index + 1)")
+                            .accessibilityLabel(localized("Remove screenshot \(index + 1)"))
                             .accessibilityIdentifier("snag.shot.\(index).remove")
                             #endif
                         }
                         #if os(tvOS)
-                        Button("Remove", role: .destructive) { draft.remove(shot.id) }
+                        Button(localized("Remove"), role: .destructive) { draft.remove(shot.id) }
                             .font(.caption)
                         #else
-                        Button(shot.edited == nil ? "Mark Up" : "Edit") { editing = shot.id }
-                            .font(.caption)
-                            .buttonStyle(.borderless)
+                        Button(shot.edited == nil ? localized("Mark Up") : localized("Edit")) { editing = shot.id }
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize() // as wide as the text needs, not the thumbnail
+                            .foregroundStyle(.tint)
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
                             .accessibilityIdentifier("snag.shot.\(index).markup")
                         #endif
                     }
@@ -278,9 +293,10 @@ public struct SnagReportView: View {
             .frame(width: 44, height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(Image(systemName: "play.fill").foregroundStyle(.white).shadow(radius: 2))
+            .accessibilityHidden(true)
             VStack(alignment: .leading) {
-                Text("Screen recording")
-                Text("\(Duration.seconds(recording.duration).formatted(.time(pattern: .minuteSecond))) · \(ByteCountFormatter.string(fromByteCount: Int64(recording.data.count), countStyle: .file))")
+                Text(localized("Screen recording"))
+                Text(verbatim: "\(Duration.seconds(recording.duration).formatted(.time(pattern: .minuteSecond))) · \(ByteCountFormatter.string(fromByteCount: Int64(recording.data.count), countStyle: .file))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -291,7 +307,7 @@ public struct SnagReportView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Remove recording")
+            .accessibilityLabel(localized("Remove recording"))
             .accessibilityIdentifier("snag.recording.remove")
         }
         .accessibilityIdentifier("snag.recording")
@@ -305,7 +321,7 @@ public struct SnagReportView: View {
                 focused = nil
                 captureScreens()
             } label: {
-                Label(draft.shots.isEmpty ? "Capture a Screen" : "Capture Another Screen", systemImage: "camera.viewfinder")
+                Label(draft.shots.isEmpty ? localized("Capture a Screen") : localized("Capture Another Screen"), systemImage: "camera.viewfinder")
             }
             .accessibilityIdentifier("snag.captureMore")
         }
@@ -314,7 +330,7 @@ public struct SnagReportView: View {
             // No photo library access needed: the picker runs out of process and hands back only
             // what the user picks.
             PhotosPicker(selection: $pickedPhotos, maxSelectionCount: ReportDraft.maximumShots - draft.shots.count, matching: .images) {
-                Label("Add from Photos", systemImage: "photo.on.rectangle")
+                Label(localized("Add from Photos"), systemImage: "photo.on.rectangle")
             }
             .accessibilityIdentifier("snag.addPhotos")
             .onChange(of: pickedPhotos) { _, items in
@@ -337,7 +353,7 @@ public struct SnagReportView: View {
                 focused = nil
                 record()
             } label: {
-                Label("Record the Problem", systemImage: "record.circle")
+                Label(localized("Record the Problem"), systemImage: "record.circle")
             }
             .accessibilityIdentifier("snag.record")
         }
@@ -346,9 +362,9 @@ public struct SnagReportView: View {
 
     private var messagePlaceholder: String {
         switch draft.kind {
-        case .bug: "What happened? What did you expect?"
-        case .featureRequest: "What would you like to see?"
-        default: "Tell us more"
+        case .bug: localized("What happened? What did you expect?")
+        case .featureRequest: localized("What would you like to see?")
+        default: localized("Tell us more")
         }
     }
 
@@ -357,17 +373,17 @@ public struct SnagReportView: View {
         switch phase {
         case .sent:
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done", action: onFinish).accessibilityIdentifier("snag.done")
+                Button(localized("Done"), action: onFinish).accessibilityIdentifier("snag.done")
             }
         default:
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel", action: onFinish).accessibilityIdentifier("snag.cancel")
+                Button(localized("Cancel"), action: onFinish).accessibilityIdentifier("snag.cancel")
             }
             ToolbarItem(placement: .confirmationAction) {
                 if phase == .sending {
                     ProgressView()
                 } else {
-                    Button("Send") { send() }
+                    Button(localized("Send")) { send() }
                         .disabled(!canSend)
                         .accessibilityIdentifier("snag.send")
                 }
@@ -381,12 +397,13 @@ public struct SnagReportView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(delivered ? .green : .orange)
                 .symbolEffect(.bounce, value: delivered)
-            Text(delivered ? "Thanks! Your report was sent." : "Thanks! Your report is saved.")
+                .accessibilityHidden(true)
+            Text(delivered ? localized("Thanks! Your report was sent.") : localized("Thanks! Your report is saved."))
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
                 .accessibilityIdentifier("snag.sent")
             if !delivered {
-                Text("It will be sent automatically when you're back online.")
+                Text(localized("It will be sent automatically when you're back online."))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -427,7 +444,7 @@ public struct SnagReportView: View {
         }
         if snag.configuration.sinks.isEmpty {
             if canEmail { composingMail = snag.prepare(draft.report(tags: options.tags)) }
-            else { phase = .failed("No way to send reports is configured.") }
+            else { phase = .failed(localized("No way to send reports is configured.")) }
             return
         }
         phase = .sending
@@ -441,7 +458,7 @@ public struct SnagReportView: View {
                 let delivered = await Self.waitForDelivery(of: submitted.id, events: events, timeout: .seconds(6))
                 phase = .sent(delivered: delivered)
             } catch {
-                phase = .failed("Couldn't save the report: \(error.localizedDescription)")
+                phase = .failed(localized("Couldn't save the report: \(error.localizedDescription)"))
             }
         }
     }
@@ -476,7 +493,7 @@ struct SnagPreviewView: View {
 
     var body: some View {
         List {
-            Section("Details") {
+            Section(localized("Details")) {
                 ForEach(Array(report.context.rows.enumerated()), id: \.offset) { _, row in
                     LabeledContent(row.label, value: row.value)
                 }
@@ -490,7 +507,7 @@ struct SnagPreviewView: View {
                     } else if attachment.isText {
                         let text = String(decoding: attachment.data.suffix(20_000), as: UTF8.self)
                         ScrollView(.horizontal) {
-                            Text(text.isEmpty ? "(empty)" : text)
+                            Text(text.isEmpty ? localized("(empty)") : text)
                                 .font(.caption.monospaced())
                                 #if !os(tvOS)
                                 .textSelection(.enabled)
@@ -504,6 +521,6 @@ struct SnagPreviewView: View {
                 }
             }
         }
-        .navigationTitle("What's Included")
+        .navigationTitle(localized("What's Included"))
     }
 }

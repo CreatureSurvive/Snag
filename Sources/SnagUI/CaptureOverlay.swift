@@ -58,6 +58,11 @@ final class CaptureOverlay {
 
 struct CaptureOverlayView: View {
     @Bindable var model: CaptureOverlayModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var spokenElapsed: String {
+        Duration.seconds(model.elapsed.rounded()).formatted(.units(allowed: [.minutes, .seconds], width: .wide))
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -66,43 +71,44 @@ struct CaptureOverlayView: View {
                 Button {
                     model.onCapture()
                 } label: {
-                    Label(model.count >= model.limit ? "Limit reached" : "Capture Screen", systemImage: "camera.fill")
+                    Label(model.count >= model.limit ? localized("Limit reached") : localized("Capture Screen"), systemImage: "camera.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.count >= model.limit)
                 .accessibilityIdentifier("snag.overlay.capture")
-                Text("\(model.count)")
+                Text(model.count, format: .number)
                     .font(.headline.monospacedDigit())
                     .frame(minWidth: 24)
-                    .accessibilityLabel("\(model.count) screenshots")
-                Button("Done", action: model.onDone)
+                    .accessibilityLabel(localized("\(model.count) screenshots"))
+                Button(localized("Done"), action: model.onDone)
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("snag.overlay.done")
             case .recordReady:
                 Button {
                     model.onStartRecording()
                 } label: {
-                    Label("Start Recording", systemImage: "record.circle")
+                    Label(localized("Start Recording"), systemImage: "record.circle")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
                 .accessibilityIdentifier("snag.overlay.record")
-                Button("Cancel", action: model.onDone)
+                Button(localized("Cancel"), action: model.onDone)
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("snag.overlay.cancel")
             case .recording:
                 Image(systemName: "circle.fill")
                     .foregroundStyle(.red)
-                    .symbolEffect(.pulse)
+                    .symbolEffect(.pulse, isActive: !reduceMotion)
                     .accessibilityHidden(true)
                 Text(Duration.seconds(model.elapsed).formatted(.time(pattern: .minuteSecond)))
                     .font(.headline.monospacedDigit())
+                    .accessibilityLabel(localized("Recording, \(spokenElapsed)"))
                     .accessibilityIdentifier("snag.overlay.elapsed")
                 ProgressView(value: min(model.elapsed, model.maximum), total: model.maximum)
                     .tint(.red)
-                Button("Stop", action: model.onStopRecording)
+                Button(localized("Stop"), action: model.onStopRecording)
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
                     .accessibilityIdentifier("snag.overlay.stop")
@@ -115,10 +121,12 @@ struct CaptureOverlayView: View {
         .overlay {
             Capsule().fill(.white).opacity(model.flash ? 0.7 : 0).allowsHitTesting(false)
         }
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        .accessibilityShowsLargeContentViewer()
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeOut(duration: 0.25), value: model.flash)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: model.flash)
         .animation(.snappy, value: model.mode)
     }
 }

@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Snag",
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
@@ -26,11 +27,13 @@ let package = Package(
         .target(
             name: "SnagUI",
             dependencies: ["Snag"],
+            resources: [.process("Resources")],
             swiftSettings: [.enableUpcomingFeature("ExistentialAny")]
         ),
         .target(
             name: "SnagPostmortem",
             dependencies: ["Snag", .product(name: "Postmortem", package: "Postmortem")],
+            resources: [.process("Resources")],
             swiftSettings: [.enableUpcomingFeature("ExistentialAny")]
         ),
         .testTarget(

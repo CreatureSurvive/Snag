@@ -24,11 +24,11 @@ struct CrashPromptModifier: ViewModifier {
                 if phase == .active { Task { await check() } }
             }
             .alert(title, isPresented: $asking, presenting: diagnostic) { diagnostic in
-                Button("Send Report") { Task { try? await reporter.send(diagnostic) } }
-                Button("Add Details…") { describing = true }
-                Button("Don't Send", role: .cancel) { Task { await reporter.dismissPending() } }
+                Button(localized("Send Report")) { Task { try? await reporter.send(diagnostic) } }
+                Button(localized("Add Details…")) { describing = true }
+                Button(localized("Don't Send"), role: .cancel) { Task { await reporter.dismissPending() } }
             } message: { _ in
-                Text("A report with technical details helps fix it. No personal information is included.")
+                Text(localized("A report with technical details helps fix it. No personal information is included."))
             }
             .sheet(isPresented: $describing) {
                 if let diagnostic {
@@ -38,8 +38,8 @@ struct CrashPromptModifier: ViewModifier {
     }
 
     private var title: String {
-        let app = (Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String) ?? (Bundle.main.infoDictionary?["CFBundleName"] as? String) ?? "The app"
-        return diagnostic?.kind == .hang ? "\(app) stopped responding" : "\(app) quit unexpectedly"
+        let app = (Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String) ?? (Bundle.main.infoDictionary?["CFBundleName"] as? String) ?? localized("The app")
+        return diagnostic?.kind == .hang ? localized("\(app) stopped responding") : localized("\(app) quit unexpectedly")
     }
 
     private func check() async {
@@ -65,13 +65,13 @@ struct CrashDetailsForm: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("What were you doing when it happened?", text: $message, axis: .vertical)
+                    TextField(localized("What were you doing when it happened?"), text: $message, axis: .vertical)
                         .lineLimit(3...8)
                 } footer: {
                     Text(diagnostic.summary)
                 }
                 Section {
-                    TextField("Email (optional)", text: $contact)
+                    TextField(localized("Email (optional)"), text: $contact)
                         .textContentType(.emailAddress)
                         .autocorrectionDisabled()
                         #if os(iOS) || os(visionOS)
@@ -80,14 +80,14 @@ struct CrashDetailsForm: View {
                         #endif
                 }
                 if failed {
-                    Text("Couldn't save the report. Try again.").foregroundStyle(.red)
+                    Text(localized("Couldn't save the report. Try again.")).foregroundStyle(.red)
                 }
             }
-            .navigationTitle("Crash Report")
+            .navigationTitle(localized("Crash Report"))
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onDone) }
+                ToolbarItem(placement: .cancellationAction) { Button(localized("Cancel"), action: onDone) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") {
+                    Button(localized("Send")) {
                         sending = true
                         Task {
                             let trimmed = contact.trimmingCharacters(in: .whitespacesAndNewlines)

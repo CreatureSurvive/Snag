@@ -15,13 +15,14 @@ public struct SnagFormOptions: Sendable {
             self.systemImage = systemImage
         }
 
-        public static let bug = KindOption(.bug, title: "Bug", systemImage: "ladybug")
-        public static let feedback = KindOption(.feedback, title: "Feedback", systemImage: "bubble.left")
-        public static let feature = KindOption(.featureRequest, title: "Idea", systemImage: "lightbulb")
+        public static let bug = KindOption(.bug, title: localized("Bug"), systemImage: "ladybug")
+        public static let feedback = KindOption(.feedback, title: localized("Feedback"), systemImage: "bubble.left")
+        public static let feature = KindOption(.featureRequest, title: localized("Idea"), systemImage: "lightbulb")
     }
 
     /// The kinds the user can pick from. One kind hides the picker.
     public var kinds: [KindOption]
+    /// Defaults to "Report a Problem" in the user's language.
     public var navigationTitle: String
     /// Ask for an email address (remembered for next time).
     public var asksForContact: Bool
@@ -39,7 +40,7 @@ public struct SnagFormOptions: Sendable {
 
     public init(
         kinds: [KindOption] = [.bug, .feedback, .feature],
-        navigationTitle: String = "Report a Problem",
+        navigationTitle: String? = nil,
         asksForContact: Bool = true,
         contact: String? = nil,
         redaction: AutomaticRedaction = .standard,
@@ -48,7 +49,7 @@ public struct SnagFormOptions: Sendable {
         tags: [String] = []
     ) {
         self.kinds = kinds
-        self.navigationTitle = navigationTitle
+        self.navigationTitle = navigationTitle ?? localized("Report a Problem")
         self.asksForContact = asksForContact
         self.contact = contact
         self.redaction = redaction

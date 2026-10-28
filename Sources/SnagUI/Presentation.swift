@@ -85,7 +85,7 @@ struct SnagReportingModifier: ViewModifier {
                     .frame(minWidth: 480, idealWidth: 540, minHeight: 560, idealHeight: 680)
                     #endif
                 } else {
-                    Text("Snag isn't configured. Pass a Snag to .snagReporting(_:) or set Snag.shared.")
+                    Text(verbatim: "Snag isn't configured. Pass a Snag to .snagReporting(_:) or set Snag.shared.")
                         .padding()
                 }
             }
@@ -98,9 +98,9 @@ struct SnagReportingModifier: ViewModifier {
                 guard triggers.contains(.screenshot), isFrontmost else { return }
                 askingAboutScreenshot = true
             }
-            .confirmationDialog("Report a problem with this screen?", isPresented: $askingAboutScreenshot, titleVisibility: .visible) {
-                Button("Report a Problem") { present(includeScreenshot: true) }
-                Button("Not Now", role: .cancel) {}
+            .confirmationDialog(localized("Report a problem with this screen?"), isPresented: $askingAboutScreenshot, titleVisibility: .visible) {
+                Button(localized("Report a Problem")) { present(includeScreenshot: true) }
+                Button(localized("Not Now"), role: .cancel) {}
             }
             .onAppear { if triggers.contains(.shake) { ShakeDetector.install() } }
             #endif

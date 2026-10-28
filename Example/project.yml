@@ -29,6 +29,7 @@ targets:
       properties:
         UILaunchScreen: {}
         CFBundleDisplayName: Snag Example
+        CFBundleLocalizations: [en, de, es, fr, ja, pt-BR, zh-Hans]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:

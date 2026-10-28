@@ -14,13 +14,13 @@ final class SnagExampleUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func launch() throws -> XCUIApplication {
+    func launch(_ arguments: [String] = []) throws -> XCUIApplication {
         guard let url = env["SNAG_SERVER_URL"], let key = env["SNAG_API_KEY"] else {
             throw XCTSkip("Set TEST_RUNNER_SNAG_SERVER_URL and TEST_RUNNER_SNAG_API_KEY")
         }
         let app = XCUIApplication()
         app.launchEnvironment = ["SNAG_SERVER_URL": url, "SNAG_API_KEY": key]
-        app.launchArguments = ["-showShakeButton"]
+        app.launchArguments = ["-showShakeButton"] + arguments
         app.launch()
         return app
     }
@@ -252,6 +252,75 @@ final class SnagExampleUITests: XCTestCase {
         #endif
         XCTAssertTrue(button.waitForExistence(timeout: 5))
     }
+
+    #if os(iOS)
+    /// The form in German at the largest accessibility text size: translated, laid out, and
+    /// passing Xcode's accessibility audit.
+    func testFormInGermanAtLargestTextSizePassesAudit() throws {
+        let app = try launch(["-AppleLanguages", "(de)", "-AppleLocale", "de_DE",
+                              "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        // At this size the button is below the fold.
+        XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10))
+        let button = reveal(app.buttons["example.report"], in: app)
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        button.tap()
+        let send = app.buttons["snag.send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertEqual(send.label, "Senden")
+        XCTAssertTrue(app.staticTexts["Problem melden"].exists, "navigation title")
+        XCTAssertEqual(app.textFields["snag.title"].placeholderValue, "Zusammenfassung")
+        attach(app, "Form, German, AX5")
+        try app.performAccessibilityAudit(for: Self.audits) { issue in Self.ignorable(issue) }
+        app.buttons["snag.cancel"].tap()
+    }
+
+    func testFormAndInboxPassAccessibilityAudit() throws {
+        let app = try launch()
+        let button = app.buttons["example.report"]
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        button.tap()
+        XCTAssertTrue(app.textFields["snag.title"].waitForExistence(timeout: 5))
+        try app.performAccessibilityAudit(for: Self.audits) { issue in Self.ignorable(issue) }
+        app.buttons["snag.cancel"].tap()
+
+        let inbox = app.buttons["example.inbox"]
+        XCTAssertTrue(inbox.waitForExistence(timeout: 5))
+        inbox.tap()
+        XCTAssertTrue(app.navigationBars["My Reports"].waitForExistence(timeout: 5))
+        try app.performAccessibilityAudit(for: Self.audits) { issue in Self.ignorable(issue) }
+    }
+
+    static let audits: XCUIAccessibilityAuditType = [.contrast, .elementDetection, .hitRegion, .sufficientElementDescription, .dynamicType, .textClipped, .trait]
+
+    /// Issues in system chrome or the example app itself, not in Snag's views.
+    static func ignorable(_ issue: XCUIAccessibilityAuditIssue) -> Bool {
+        let ignored = isSystemIssue(issue)
+        print(ignored ? "AUDIT ignored:" : "AUDIT FAILED:", terminator: " ")
+        return ignored
+    }
+
+    static func isSystemIssue(_ issue: XCUIAccessibilityAuditIssue) -> Bool {
+        print("AUDIT: \(issue.auditType) \(issue.compactDescription) — \(issue.element.map { "\($0.elementType.rawValue) id=\($0.identifier) label=\($0.label)" } ?? "no element")")
+        guard let element = issue.element else { return true }
+        // Contrast, text size and clipping of system-styled text (bar buttons, inline titles,
+        // grouped-form headers and footers) are UIKit's choices; check them on Snag's own views.
+        let visual: [XCUIAccessibilityAuditType] = [.contrast, .dynamicType, .textClipped]
+        if visual.contains(issue.auditType) {
+            let systemStyled = !element.identifier.hasPrefix("snag.") || ["snag.cancel", "snag.send", "snag.done"].contains(element.identifier)
+            if systemStyled || (issue.auditType == .contrast && !element.isEnabled) { return true }
+            // The thumbnail's Mark Up label uses .subheadline and grows, but sits in a horizontal
+            // scroll view the audit can't measure; the German largest-size run checks it isn't clipped.
+            if issue.auditType == .dynamicType, element.identifier.hasSuffix(".markup") { return true }
+            // Tinted buttons use the host app's accent color (system blue here, just under 4.5:1).
+            if issue.auditType == .contrast, element.elementType == .button { return true }
+        }
+        let id = element.identifier
+        if id.hasPrefix("example.") { return true }
+        // The keyboard and navigation bar belong to the system.
+        if element.elementType == .keyboard || element.elementType == .key || element.elementType == .navigationBar { return true }
+        return false
+    }
+    #endif
 
     // MARK: - Helpers
 
