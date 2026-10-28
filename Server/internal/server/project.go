@@ -32,6 +32,9 @@ type Project struct {
 	GroupDuplicates bool `json:"groupDuplicates"`
 	// Redaction is the server-side scrub level: "" (standard), "strict" or "off".
 	Redaction string `json:"redaction,omitempty"`
+	// WebOrigins are the sites (https://example.com) whose pages may send reports with the web
+	// SDK. "*" allows any.
+	WebOrigins []string `json:"webOrigins,omitempty"`
 	// FromConfig marks projects seeded from SNAG_API_KEYS or the projects file.
 	FromConfig bool `json:"fromConfig,omitempty"`
 
@@ -126,6 +129,7 @@ type ProjectSeed struct {
 	Attest          *AttestConfig     `json:"attest,omitempty"`
 	GroupDuplicates *bool             `json:"groupDuplicates,omitempty"`
 	Redaction       string            `json:"redaction,omitempty"`
+	WebOrigins      []string          `json:"webOrigins,omitempty"`
 }
 
 var ErrProjectExists = errors.New("a project with that slug already exists")
@@ -165,6 +169,7 @@ func OpenProjects(dataDir string, seeds []ProjectSeed) (*ProjectStore, error) {
 				p.GroupDuplicates = *seed.GroupDuplicates
 			}
 			p.Redaction = seed.Redaction
+			p.WebOrigins = seed.WebOrigins
 			if seed.Notify != nil {
 				p.Notify = *seed.Notify
 			}

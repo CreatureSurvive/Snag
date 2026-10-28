@@ -81,6 +81,10 @@
       <option value="off" {{if eq .P.Redaction "off"}}selected{{end}}>Off: trust the app's redaction</option>
     </select>
   </label>
+  <label>Web origins
+    <textarea name="webOrigins" rows="2" placeholder="https://example.com">{{join .P.WebOrigins "\n"}}</textarea>
+  </label>
+  <p class="hint">Sites whose pages may send reports with the web SDK, one per line: <code>&lt;script src="{{if .Ingest}}{{.Ingest}}{{else}}https://your-snag-server{{end}}/sdk/snag.js"&gt;&lt;/script&gt;</code> then <code>Snag.init({ url, apiKey })</code>. Use a separate ingest key for the web; it's visible in the page.</p>
   <p class="hint">The app redacts before sending. The server runs the same rules again on titles, messages, custom context and text attachments, so older or custom clients can't store secrets. The contact field is kept.</p>
 
   <h2>Forward new issues</h2>

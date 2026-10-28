@@ -161,6 +161,8 @@ func (s *Server) routes() {
 		writeJSONResponse(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	s.mux.HandleFunc("POST /api/v1/reports", s.handleIngest)
+	s.mux.HandleFunc("OPTIONS /api/v1/reports", s.handleReportsPreflight)
+	s.mux.HandleFunc("GET /sdk/snag.js", s.handleWebSDK)
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
 	s.mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
@@ -254,6 +256,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	project, ok := s.authenticateProject(r)
 	if !ok {
 		fail(w, http.StatusUnauthorized, "missing or invalid API key")
+		return
+	}
+	if !s.checkOrigin(w, r, project) {
 		return
 	}
 	// A retry of a report we already have: answer without reading the body

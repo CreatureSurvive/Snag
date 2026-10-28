@@ -753,6 +753,16 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 			p.Name = truncate(name, 80)
 		}
 		p.GroupDuplicates = r.FormValue("groupDuplicates") == "on"
+		p.WebOrigins = nil
+		for _, o := range splitList(strings.ReplaceAll(r.FormValue("webOrigins"), "\n", ",")) {
+			if o == "*" {
+				p.WebOrigins = append(p.WebOrigins, o)
+			} else if n := normalizeOrigin(o); n != "" {
+				p.WebOrigins = append(p.WebOrigins, n)
+			} else {
+				return fmt.Errorf("%q isn't a web origin like https://example.com", o)
+			}
+		}
 		switch level := r.FormValue("redaction"); level {
 		case RedactStandard, RedactStrict, RedactOff:
 			p.Redaction = level
