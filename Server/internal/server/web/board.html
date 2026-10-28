@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/style.css?v={{cssVersion}}">
+</head>
+<body class="board">
+<main>
+  <h1>{{.Title}}</h1>
+  {{with .P.Board.Intro}}<p class="intro">{{.}}</p>{{end}}
+  {{with .Flash}}<p class="flash" role="status">{{.}}</p>{{end}}
+  {{if .Items}}
+  <ol class="ideas">
+    {{range .Items}}
+    <li class="idea" id="idea-{{.Number}}">
+      <form method="post" action="/b/{{$.P.Slug}}/ideas/{{.Number}}/vote" class="vote">
+        <input type="hidden" name="token" value="{{$.Token}}">
+        <input type="hidden" name="vote" value="{{if .Voted}}0{{else}}1{{end}}">
+        <button type="submit" aria-pressed="{{if .Voted}}true{{else}}false{{end}}" aria-label="{{if .Voted}}Remove your vote for{{else}}Vote for{{end}} {{.Title}}, {{.Votes}} vote{{if ne .Votes 1}}s{{end}}">
+          <span aria-hidden="true">▲</span><span class="count">{{.Votes}}</span>
+        </button>
+      </form>
+      <div>
+        <h2>{{.Title}}</h2>
+        {{with .Note}}<p>{{.}}</p>{{end}}
+        <span class="state state-{{.State}}">{{.Status}}</span>
+      </div>
+    </li>
+    {{end}}
+  </ol>
+  {{else}}
+  <p class="muted">No ideas yet.</p>
+  {{end}}
+  <p class="muted small">Powered by Snag</p>
+</main>
+</body>
+</html>

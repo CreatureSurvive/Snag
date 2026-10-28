@@ -143,7 +143,7 @@
   ].join("\n");
 
   var DEFAULT_TEXT = {
-    button: "Feedback", title: "Send Feedback", bug: "Bug", feedback: "Feedback", idea: "Idea",
+    button: "Feedback", title: "Send Feedback", bug: "Bug", feedback: "Feedback", feature: "Idea",
     summary: "Summary", message: "What happened? What did you expect?", email: "Email (optional)",
     emailHint: "Only used to follow up on this report.",
     screenshot: "Add a screenshot of this page", removeScreenshot: "Remove screenshot",
@@ -184,7 +184,7 @@
       app: { name: (global.document && document.title) || "Web" },
       redaction: "standard", // "standard", "strict" or "off"
       button: true,
-      kinds: ["bug", "feedback", "idea"],
+      kinds: ["bug", "feedback", "feature"],
       breadcrumbs: true,
       console: true,
       contact: "",
@@ -357,7 +357,7 @@
     return node;
   }
 
-  /** Opens the report form. `kind` preselects "bug", "feedback" or "idea". */
+  /** Opens the report form. `kind` preselects "bug", "feedback" or "feature" (an idea). */
   Snag.prototype.open = function (preset) {
     preset = preset || {};
     this._ensureRoot();

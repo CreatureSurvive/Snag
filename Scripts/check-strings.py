@@ -17,7 +17,7 @@ def key_for(literal, source):
     """Swift turns interpolations into format specifiers: Int -> %lld, everything else -> %@."""
     def spec(m):
         expr = m.group(0)[2:-1]
-        if re.search(r'count|unread|hidden|index|\+ 1', expr):
+        if re.search(r'count|unread|hidden|index|votes|\+ 1', expr):
             return "%lld"
         return "%@"
     return INTERP.sub(spec, literal).replace('\\"', '"')

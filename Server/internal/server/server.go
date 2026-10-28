@@ -35,10 +35,12 @@ type Server struct {
 	github    *GitHubSync
 	attestor  *Attestor
 	symbols   *SymbolStore
-	log       *slog.Logger
-	limiter   *rateLimiter
-	csrfKey   []byte
-	mux       *http.ServeMux
+	// boardSecret keys voter hashes on the ideas board.
+	boardSecret []byte
+	log         *slog.Logger
+	limiter     *rateLimiter
+	csrfKey     []byte
+	mux         *http.ServeMux
 }
 
 // Open loads everything under cfg.DataDir, migrates older data, and returns a ready server.
@@ -64,17 +66,22 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
+	boardSecret, err := loadOrCreateKey(filepath.Join(cfg.DataDir, "board.key"))
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
-		attestor: attestor,
-		symbols:  OpenSymbols(cfg.DataDir),
-		cfg:      cfg,
-		store:    store,
-		projects: projects,
-		issues:   issues,
-		log:      logger,
-		limiter:  newRateLimiter(cfg.RatePerHour, time.Hour),
-		csrfKey:  key,
-		mux:      http.NewServeMux(),
+		boardSecret: boardSecret,
+		attestor:    attestor,
+		symbols:     OpenSymbols(cfg.DataDir),
+		cfg:         cfg,
+		store:       store,
+		projects:    projects,
+		issues:      issues,
+		log:         logger,
+		limiter:     newRateLimiter(cfg.RatePerHour, time.Hour),
+		csrfKey:     key,
+		mux:         http.NewServeMux(),
 	}
 	s.forwarder = NewDispatcher(store, projects, cfg, s.reportURL, logger)
 	s.notifier = NewNotifier(logger, cfg.NotifyPerHour)
@@ -163,6 +170,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reports", s.handleIngest)
 	s.mux.HandleFunc("OPTIONS /api/v1/reports", s.handleReportsPreflight)
 	s.mux.HandleFunc("GET /sdk/snag.js", s.handleWebSDK)
+	s.mux.HandleFunc("GET /b/{slug}", s.handleBoard)
+	s.mux.HandleFunc("POST /b/{slug}/ideas/{n}/vote", s.handleBoardVote)
+	s.mux.HandleFunc("GET /api/v1/board", s.handleAPIBoard)
+	s.mux.HandleFunc("POST /api/v1/board/{n}/vote", s.handleAPIBoardVote)
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
 	s.mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)

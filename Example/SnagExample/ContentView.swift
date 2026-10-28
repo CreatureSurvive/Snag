@@ -46,6 +46,15 @@ struct ContentView: View {
                             Label("My Reports", systemImage: "tray")
                         }
                         .accessibilityIdentifier("example.inbox")
+                        if let server = snag.configuration.sinks.lazy.compactMap({ $0 as? SnagServerSink }).first {
+                            NavigationLink {
+                                SnagIdeasView(board: SnagBoard(server: server)) { report() }
+                                    .snagScreen("Ideas")
+                            } label: {
+                                Label("Ideas", systemImage: "lightbulb")
+                            }
+                            .accessibilityIdentifier("example.ideas")
+                        }
                     }
                     Button {
                         SnagLog.shared.log("Tapped Report a Problem")

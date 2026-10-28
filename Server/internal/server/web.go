@@ -409,6 +409,9 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if r.Form.Has("fixedIn") {
 			SetFixedIn(i, r.FormValue("fixedIn"))
 		}
+		if r.Form.Has("board") {
+			SetPublic(i, r.FormValue("public") == "on", r.FormValue("publicNote"))
+		}
 		if r.Form.Has("title") {
 			if err := SetTitle(i, r.FormValue("title")); err != nil {
 				return err
@@ -753,6 +756,8 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 			p.Name = truncate(name, 80)
 		}
 		p.GroupDuplicates = r.FormValue("groupDuplicates") == "on"
+		p.Board = BoardConfig{Enabled: r.FormValue("boardEnabled") == "on",
+			Title: truncate(strings.TrimSpace(r.FormValue("boardTitle")), 120), Intro: truncate(strings.TrimSpace(r.FormValue("boardIntro")), 2000)}
 		p.WebOrigins = nil
 		for _, o := range splitList(strings.ReplaceAll(r.FormValue("webOrigins"), "\n", ",")) {
 			if o == "*" {

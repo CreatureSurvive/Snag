@@ -198,3 +198,18 @@ table.crumbs td.kind { white-space: nowrap; width: 1%; color: var(--muted); font
 table.crumbs tr.navigation td.kind { color: #3b82f6; }
 table.crumbs tr.network td:last-child { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; word-break: break-all; }
 table.crumbs tr.failed td:last-child { color: #dc2626; }
+
+/* Public ideas board */
+body.board main { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+body.board .intro { color: var(--muted); font-size: 1.05em; }
+.ideas { list-style: none; padding: 0; margin: 24px 0; display: flex; flex-direction: column; gap: 12px; }
+.idea { display: flex; gap: 16px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.idea h2 { margin: 2px 0 6px; font-size: 1.05em; }
+.idea p { margin: 0 0 8px; white-space: pre-wrap; }
+.vote button { display: flex; flex-direction: column; align-items: center; min-width: 52px; min-height: 52px; padding: 6px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; font-weight: 600; }
+.vote button[aria-pressed="true"] { background: var(--accent, #3b5bdb); border-color: transparent; color: #fff; }
+.vote .count { font-variant-numeric: tabular-nums; }
+.state { font-size: 0.85em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.state-planned { color: #1971c2; border-color: color-mix(in srgb, #1971c2 40%, transparent); }
+.state-in_progress { color: #e8590c; border-color: color-mix(in srgb, #e8590c 40%, transparent); }
+.state-done { color: #2f9e44; border-color: color-mix(in srgb, #2f9e44 40%, transparent); }

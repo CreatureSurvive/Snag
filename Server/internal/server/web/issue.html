@@ -196,6 +196,17 @@ Thanks for reporting this. </textarea></label>
   </div>
   {{end}}
 
+  {{if $p.Board.Enabled}}
+  <form class="panel form compact" method="post" action="{{$self}}/update">
+    <h3>Ideas board</h3>
+    <input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="board" value="1">
+    <label class="check"><input type="checkbox" name="public" {{if .I.Public}}checked{{end}}> Show on the <a href="/b/{{$p.Slug}}">public board</a></label>
+    <label>Public description <textarea name="publicNote" rows="3" maxlength="2000" placeholder="Shown to visitors. Reporters' messages are never public.">{{.I.PublicNote}}</textarea></label>
+    <p class="muted">{{.I.Score}} vote{{if ne .I.Score 1}}s{{end}} ({{.I.Votes}} from the board, {{len .I.Reports}} from reports)</p>
+    <button type="submit">Save</button>
+  </form>
+  {{end}}
+
   <div class="panel">
     <h3>Possible duplicates</h3>
     {{if .Similar}}

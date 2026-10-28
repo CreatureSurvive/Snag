@@ -87,8 +87,14 @@ type Issue struct {
 	// GitHub links the issue a report was forwarded to, for two-way sync.
 	GitHub *GitHubLink `json:"github,omitempty"`
 	// Thread holds messages the reporters see in the app.
-	Thread   []ThreadMessage `json:"thread,omitempty"`
-	Activity []Event         `json:"activity,omitempty"`
+	Thread []ThreadMessage `json:"thread,omitempty"`
+	// Public puts the issue on the project's ideas board, with PublicNote as its description.
+	Public     bool   `json:"public,omitempty"`
+	PublicNote string `json:"publicNote,omitempty"`
+	// Votes from the board; Voters are hashed voter IDs, so each votes once.
+	Votes    int      `json:"votes,omitempty"`
+	Voters   []string `json:"voters,omitempty"`
+	Activity []Event  `json:"activity,omitempty"`
 }
 
 type Note struct {
@@ -576,6 +582,10 @@ func (is *IssueStore) Merge(project string, into int, from []int) (*Issue, error
 				target.Labels = append(target.Labels, l)
 			}
 		}
+		for _, v := range src.Voters {
+			target.Vote(v, true) // a voter of both counts once
+		}
+		src.Votes, src.Voters = 0, nil
 		for _, n := range src.Notes {
 			n.Text = fmt.Sprintf("(from #%d) %s", src.Number, n.Text)
 			target.Notes = append(target.Notes, n)
@@ -734,6 +744,10 @@ func (is *IssueStore) List(project string, f IssueFilter) ([]*Issue, int) {
 		case "priority":
 			if PriorityRank(a.Priority) != PriorityRank(b.Priority) {
 				return PriorityRank(a.Priority) > PriorityRank(b.Priority)
+			}
+		case "votes":
+			if a.Score() != b.Score() {
+				return a.Score() > b.Score()
 			}
 		}
 		au, bu := a.UpdatedAt, b.UpdatedAt
