@@ -219,7 +219,9 @@ final class SnagExampleUITests: XCTestCase {
         reveal(app.buttons["example.inbox"], in: app).tap()
         let row = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", marker)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the report is listed")
-        XCTAssertTrue(row.label.contains("Received"), "status shown: \(row.label)")
+        // The status arrives with the inbox refresh.
+        let received = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", marker, "Received")
+        XCTAssertTrue(app.buttons.matching(received).firstMatch.waitForExistence(timeout: 10), "status shown: \(row.label)")
         attach(app, "My Reports")
         row.tap()
         let teamMessage = app.staticTexts["Thanks! Which server version?"]

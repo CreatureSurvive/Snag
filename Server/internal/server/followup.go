@@ -120,11 +120,18 @@ func (s *Server) followUpRecord(w http.ResponseWriter, r *http.Request) (*Record
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	rec, err := s.store.Get(r.PathValue("id"))
 	if err != nil || rec.ReaderTokenHash == "" || subtle.ConstantTimeCompare([]byte(hashKey(strings.TrimSpace(token))), []byte(rec.ReaderTokenHash)) != 1 {
-		// Same answer for unknown reports and wrong tokens.
+		// Same answer for unknown reports and wrong tokens; guessing is limited per address.
+		if !s.limiter.allow("followup-miss|" + s.clientIP(r)) {
+			w.Header().Set("Retry-After", "600")
+			fail(w, http.StatusTooManyRequests, "too many requests")
+			return nil, nil, false
+		}
 		fail(w, http.StatusNotFound, "not found")
 		return nil, nil, false
 	}
-	if !s.limiter.allow("followup|" + s.clientIP(r)) {
+	// Valid requests are limited per report, not per address: one app checks many reports, and
+	// many users can share an address.
+	if !s.limiter.allow("followup|" + rec.ID) {
 		w.Header().Set("Retry-After", "600")
 		fail(w, http.StatusTooManyRequests, "too many requests")
 		return nil, nil, false

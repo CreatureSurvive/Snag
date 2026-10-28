@@ -117,13 +117,18 @@ struct StatusBadge: View {
         case .received: (localized("Received"), .blue)
         case nil: (localized("Sent"), .secondary)
         }
-        Text(label)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.12), in: Capsule())
-            .accessibilityIdentifier("snag.inbox.status")
+        // Colored text on a tint fails contrast for orange and green; the color is in the dot.
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(label)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.14), in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("snag.inbox.status")
     }
 }
 

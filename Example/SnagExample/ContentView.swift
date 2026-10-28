@@ -46,15 +46,6 @@ struct ContentView: View {
                             Label("My Reports", systemImage: "tray")
                         }
                         .accessibilityIdentifier("example.inbox")
-                        if let server = snag.configuration.sinks.lazy.compactMap({ $0 as? SnagServerSink }).first {
-                            NavigationLink {
-                                SnagIdeasView(board: SnagBoard(server: server)) { report() }
-                                    .snagScreen("Ideas")
-                            } label: {
-                                Label("Ideas", systemImage: "lightbulb")
-                            }
-                            .accessibilityIdentifier("example.ideas")
-                        }
                     }
                     Button {
                         SnagLog.shared.log("Tapped Report a Problem")
@@ -71,6 +62,16 @@ struct ContentView: View {
                         ShakeButton()
                     }
                     #endif
+                    // Below the buttons the UI tests use, so it doesn't push them off screen.
+                    if let snag = Snag.shared, let server = snag.configuration.sinks.lazy.compactMap({ $0 as? SnagServerSink }).first {
+                        NavigationLink {
+                            SnagIdeasView(board: SnagBoard(server: server)) { report() }
+                                .snagScreen("Ideas")
+                        } label: {
+                            Label("Ideas", systemImage: "lightbulb")
+                        }
+                        .accessibilityIdentifier("example.ideas")
+                    }
                 } footer: {
                     #if os(iOS)
                     Text("Or shake the device. The email above is marked private and the password field is hidden automatically.")

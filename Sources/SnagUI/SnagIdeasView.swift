@@ -69,9 +69,12 @@ public struct SnagIdeasView: View {
                 if let note = idea.note, !note.isEmpty {
                     Text(note).font(.subheadline).foregroundStyle(.secondary)
                 }
-                Text(idea.status)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(color(idea.state))
+                HStack(spacing: 4) {
+                    Circle().fill(color(idea.state)).frame(width: 7, height: 7).accessibilityHidden(true)
+                    Text(idea.status)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
