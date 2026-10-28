@@ -57,7 +57,7 @@
     <details open>
       <summary>Activity before the report · {{len .}} step{{if ne (len .) 1}}s{{end}}</summary>
       <table class="crumbs">
-        {{range .}}<tr class="crumb {{.Kind}}{{if .Failed}} failed{{end}}"><td class="when">−{{.Before}}</td><td class="kind">{{.Kind}}</td><td>{{.Message}}</td></tr>
+        {{range .}}<tr class="crumb {{.Kind}}{{if .Failed}} failed{{end}}"><td class="when">−{{.Before}}</td><td class="crumb-kind">{{.Kind}}</td><td>{{.Message}}</td></tr>
         {{end}}
       </table>
     </details>

@@ -960,7 +960,7 @@ func formatDeviceValue(key string, v any) string {
 		case "freeDiskBytes", "memoryBytes":
 			return formatBytes(int64(val))
 		case "uptimeSeconds":
-			return (time.Duration(val) * time.Second).Round(time.Minute).String()
+			return formatUptime(time.Duration(val) * time.Second)
 		}
 		return strconv.FormatFloat(val, 'f', -1, 64)
 	case []any:
@@ -975,6 +975,22 @@ func formatDeviceValue(key string, v any) string {
 		data, _ := json.Marshal(val)
 		return string(data)
 	}
+}
+
+// formatUptime reads like the app's own preview: "50 days, 12 hr", "3 hr, 5 min", "42 min".
+func formatUptime(d time.Duration) string {
+	days, hours, minutes := int(d.Hours())/24, int(d.Hours())%24, int(d.Minutes())%60
+	switch {
+	case days > 0:
+		unit := "days"
+		if days == 1 {
+			unit = "day"
+		}
+		return fmt.Sprintf("%d %s, %d hr", days, unit, hours)
+	case hours > 0:
+		return fmt.Sprintf("%d hr, %d min", hours, minutes)
+	}
+	return fmt.Sprintf("%d min", minutes)
 }
 
 func formatBytes(n int64) string {
