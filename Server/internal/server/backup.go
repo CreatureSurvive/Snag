@@ -3,6 +3,7 @@ package server
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,6 +58,11 @@ func WriteBackup(dataDir string, w io.Writer) error {
 }
 
 func writeArchive(w io.Writer, walk func(add func(rel string) error) error, dataDir string, extra ...archiveFile) error {
+	return writeArchiveWith(w, func(add func(string) error, _ func(string, io.Reader, int64) error) error { return walk(add) }, dataDir, extra...)
+}
+
+// writeArchiveWith also lets walk add content from elsewhere (attachments kept in S3).
+func writeArchiveWith(w io.Writer, walk func(add func(rel string) error, addReader func(rel string, r io.Reader, size int64) error) error, dataDir string, extra ...archiveFile) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	for _, f := range extra {
@@ -66,6 +72,13 @@ func writeArchive(w io.Writer, walk func(add func(rel string) error) error, data
 		if _, err := tw.Write(f.data); err != nil {
 			return err
 		}
+	}
+	addReader := func(rel string, r io.Reader, size int64) error {
+		if err := tw.WriteHeader(&tar.Header{Name: rel, Mode: 0o640, Size: size, ModTime: time.Now()}); err != nil {
+			return err
+		}
+		_, err := io.CopyN(tw, r, size)
+		return err
 	}
 	err := walk(func(rel string) error {
 		f, err := os.Open(filepath.Join(dataDir, filepath.FromSlash(rel)))
@@ -85,7 +98,7 @@ func writeArchive(w io.Writer, walk func(add func(rel string) error) error, data
 		}
 		_, err = io.CopyN(tw, f, info.Size())
 		return err
-	})
+	}, addReader)
 	if err != nil {
 		return err
 	}
@@ -112,13 +125,19 @@ func (s *Server) WriteProjectExport(slug string, w io.Writer) error {
 		return err
 	}
 	var reports []string
+	remote := map[string]StoredFile{} // archive path -> attachment kept in S3
 	for _, rec := range s.store.All() {
 		if rec.Project == slug {
 			reports = append(reports, rec.ID)
+			for _, f := range rec.Files {
+				if f.Remote {
+					remote["reports/"+rec.ID+"/"+f.Name] = f
+				}
+			}
 		}
 	}
 	dir := s.cfg.DataDir
-	return writeArchive(w, func(add func(string) error) error {
+	return writeArchiveWith(w, func(add func(string) error, addReader func(string, io.Reader, int64) error) error {
 		files, _ := os.ReadDir(filepath.Join(dir, "issues", slug))
 		for _, f := range files {
 			if f.Type().IsRegular() && !strings.HasSuffix(f.Name(), ".tmp") {
@@ -141,10 +160,25 @@ func (s *Server) WriteProjectExport(slug string, w io.Writer) error {
 			files, _ := os.ReadDir(filepath.Join(dir, "reports", id))
 			for _, f := range files {
 				if f.Type().IsRegular() && !strings.HasSuffix(f.Name(), ".tmp") {
-					if err := add("reports/" + id + "/" + f.Name()); err != nil {
+					rel := "reports/" + id + "/" + f.Name()
+					delete(remote, rel)
+					if err := add(rel); err != nil {
 						return err
 					}
 				}
+			}
+		}
+		// Attachments in S3 go into the export too, so it's complete on another server.
+		for rel, f := range remote {
+			id := strings.Split(rel, "/")[1]
+			body, err := s.openFile(context.Background(), id, f)
+			if err != nil {
+				return fmt.Errorf("fetching %s from S3: %w", f.Filename, err)
+			}
+			err = addReader(rel, body, f.Size)
+			body.Close()
+			if err != nil {
+				return err
 			}
 		}
 		return nil

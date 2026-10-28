@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -38,6 +39,7 @@ type Server struct {
 	symbols   *SymbolStore
 	auth      *Auth
 	metrics   *Metrics
+	s3        *S3
 	textIndex textCache
 	// boardSecret keys voter hashes on the ideas board.
 	boardSecret []byte
@@ -96,6 +98,20 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	s.forwarder = NewDispatcher(store, projects, cfg, s.reportURL, logger)
 	s.notifier = NewNotifier(logger, cfg.NotifyPerHour)
 	s.github = NewGitHubSync(issues, projects, cfg, logger)
+	if cfg.S3 != nil {
+		if s.s3, err = NewS3(*cfg.S3); err != nil {
+			return nil, err
+		}
+		store.OnDelete = s.deleteRemote
+		s.forwarder.Open = func(rec *Record, f StoredFile) ([]byte, error) {
+			body, err := s.openFile(context.Background(), rec.ID, f)
+			if err != nil {
+				return nil, err
+			}
+			defer body.Close()
+			return io.ReadAll(io.LimitReader(body, 512<<20))
+		}
+	}
 	s.forwarder.OnAttempt = func(forwarder string, err error) {
 		result := "ok"
 		if err != nil {
@@ -504,6 +520,15 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "regressed", filed.Regressed, "files", len(stored.Files))
 	if len(stored.Forwarding) > 0 {
 		s.forwarder.Enqueue(stored.ID)
+	}
+	if s.s3 != nil {
+		go func(id string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if err := s.Offload(ctx, id); err != nil {
+				s.log.Warn("moving attachments to S3 (will retry)", "report", id, "err", err)
+			}
+		}(stored.ID)
 	}
 	s.notifier.Notify(project, stored.Kind, alertFor(project, stored, filed, s.issueURL(project.Slug, stored.Issue)))
 	if filed.Regressed {

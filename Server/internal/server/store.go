@@ -79,6 +79,8 @@ type StoredFile struct {
 	Role        string `json:"role"`
 	ContentType string `json:"contentType"`
 	Size        int64  `json:"size"`
+	// Remote is set once the file has moved to S3.
+	Remote bool `json:"remote,omitempty"`
 }
 
 type ForwardState struct {
@@ -104,9 +106,11 @@ func ValidID(id string) bool { return uuidPattern.MatchString(id) }
 // Store keeps reports as plain files: <dir>/reports/<id>/report.json plus one file per attachment.
 // Everything is also indexed in memory; it's meant for thousands of reports, not millions.
 type Store struct {
-	dir     string
-	mu      sync.RWMutex
-	records map[string]*Record
+	// OnDelete runs (in the background) after a report is deleted, to clean up S3.
+	OnDelete func(*Record)
+	dir      string
+	mu       sync.RWMutex
+	records  map[string]*Record
 }
 
 var ErrNotFound = errors.New("report not found")
@@ -209,7 +213,11 @@ func (s *Store) Delete(id string) error {
 	if _, ok := s.records[id]; !ok {
 		return ErrNotFound
 	}
+	rec := s.records[id]
 	delete(s.records, id)
+	if s.OnDelete != nil {
+		go s.OnDelete(rec)
+	}
 	return os.RemoveAll(s.reportDir(id))
 }
 

@@ -24,6 +24,9 @@ type Config struct {
 	TrustProxy    bool
 	RetentionDays int
 
+	// S3 stores binary attachments in an S3-compatible bucket when set.
+	S3 *S3Config
+
 	// MetricsToken lets Prometheus scrape /metrics with a Bearer token instead of the admin login.
 	MetricsToken string
 	// ProjectStorageMB caps each project's attachments (0 = no limit); projects can override it.
@@ -165,6 +168,17 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	if cfg.InboundEmailSecret, err = secret("SNAG_INBOUND_EMAIL_SECRET"); err != nil {
 		return cfg, err
+	}
+	if bucket := get("SNAG_S3_BUCKET", ""); bucket != "" {
+		s3 := &S3Config{Endpoint: get("SNAG_S3_ENDPOINT", "https://s3.amazonaws.com"), Region: get("SNAG_S3_REGION", "us-east-1"),
+			Bucket: bucket, AccessKey: get("SNAG_S3_ACCESS_KEY_ID", ""), Prefix: get("SNAG_S3_PREFIX", "")}
+		if s3.SecretKey, err = secret("SNAG_S3_SECRET_ACCESS_KEY"); err != nil {
+			return cfg, err
+		}
+		if s3.Prefix != "" && !strings.HasSuffix(s3.Prefix, "/") {
+			s3.Prefix += "/"
+		}
+		cfg.S3 = s3
 	}
 	if cfg.MetricsToken, err = secret("SNAG_METRICS_TOKEN"); err != nil {
 		return cfg, err

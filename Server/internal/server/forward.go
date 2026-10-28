@@ -121,6 +121,8 @@ type Dispatcher struct {
 	MaxAttempts int
 	// Build makes a project's forwarders; tests replace it.
 	Build func(p *Project) []Forwarder
+	// Open reads an attachment wherever it's stored; nil reads the local file.
+	Open func(rec *Record, f StoredFile) ([]byte, error)
 	// OnDelivered runs after a successful forward.
 	OnDelivered func(rec *Record, forwarder, url string)
 	// OnAttempt runs after every delivery attempt.
@@ -264,6 +266,9 @@ func (d *Dispatcher) Process(ctx context.Context, id string) {
 	}
 	now := time.Now()
 	opener := func(f StoredFile) ([]byte, error) {
+		if d.Open != nil {
+			return d.Open(rec, f)
+		}
 		path, _, err := d.store.FilePath(rec.ID, f.Name)
 		if err != nil {
 			return nil, err

@@ -632,6 +632,10 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", file.ContentType)
 	w.Header().Set("Content-Disposition", disposition+`; filename="`+file.Filename+`"`)
+	if _, err := os.Stat(path); err != nil && file.Remote && s.s3 != nil {
+		s.serveRemote(w, r, r.PathValue("id"), file)
+		return
+	}
 	http.ServeFile(w, r, path)
 }
 

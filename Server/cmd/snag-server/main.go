@@ -105,6 +105,23 @@ func main() {
 		}()
 	}
 
+	if cfg.S3 != nil {
+		// Media still on disk (S3 was down, or just turned on) moves over in the background.
+		go func() {
+			ticker := time.NewTicker(10 * time.Minute)
+			defer ticker.Stop()
+			for {
+				if n := srv.OffloadPending(ctx); n > 0 {
+					logger.Info("moved attachments to S3", "reports", n)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
 	if cfg.BackupDir != "" && cfg.BackupHours > 0 {
 		go func() {
 			ticker := time.NewTicker(time.Duration(cfg.BackupHours) * time.Hour)
