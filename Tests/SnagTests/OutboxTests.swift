@@ -199,6 +199,18 @@ import Testing
         let logs = await snag.collectLogs()
         #expect(logs.map(\.filename) == ["a.txt", "c.txt"])
     }
+
+    @Test func aSlowLogSourceDoesNotHoldUpTheReport() async {
+        // Blocks its thread like a large OSLogStore read, ignoring cancellation.
+        let stuck = CustomLogSource(filename: "slow.txt") { usleep(2_000_000); return "late" }
+        let quick = CustomLogSource(filename: "quick.txt") { "Q" }
+        let snag = Snag(SnagConfiguration(sinks: [], logSources: [stuck, quick], logTimeout: .milliseconds(200),
+                                          outboxDirectory: temporaryDirectory()), startDelivery: false)
+        let start = ContinuousClock.now
+        let logs = await snag.collectLogs()
+        #expect(ContinuousClock.now - start < .seconds(1))
+        #expect(logs.map(\.filename).filter { $0 != "breadcrumbs.json" } == ["quick.txt"])
+    }
 }
 
 final class SlowSink: ReportSink, @unchecked Sendable {

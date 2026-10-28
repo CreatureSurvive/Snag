@@ -9,6 +9,9 @@ public struct SnagConfiguration: Sendable {
     public var context: ContextOptions
     /// Log text attached to every report. The user can turn logs off in the form.
     public var logSources: [any LogSource]
+    /// How long each log source gets before the report goes without it, so a slow source (a
+    /// large `OSLogStore`, say) never holds up Send.
+    public var logTimeout: Duration
     /// Recent activity attached as `breadcrumbs.json` (with the logs, under the same toggle).
     /// `nil` attaches none.
     public var breadcrumbs: Breadcrumbs?
@@ -25,6 +28,7 @@ public struct SnagConfiguration: Sendable {
         textRedactor: TextRedactor = .standard,
         context: ContextOptions = .all,
         logSources: [any LogSource] = [SnagLog.shared],
+        logTimeout: Duration = .seconds(5),
         breadcrumbs: Breadcrumbs? = .shared,
         customContext: @escaping @Sendable @MainActor () -> [String: String] = { [:] },
         retryPolicy: RetryPolicy = .default,
@@ -35,6 +39,7 @@ public struct SnagConfiguration: Sendable {
         self.textRedactor = textRedactor
         self.context = context
         self.logSources = logSources
+        self.logTimeout = logTimeout
         self.breadcrumbs = breadcrumbs
         self.customContext = customContext
         self.retryPolicy = retryPolicy
@@ -93,10 +98,11 @@ public final class Snag: Sendable {
     /// breadcrumbs.
     public func collectLogs() async -> [Attachment] {
         let crumbs = configuration.breadcrumbs?.attachment()
+        let timeout = configuration.logTimeout
         let logs = await withTaskGroup(of: (Int, Attachment?).self) { group in
             for (index, source) in configuration.logSources.enumerated() {
                 group.addTask {
-                    guard let text = await source.collect(), !text.isEmpty else { return (index, nil) }
+                    guard let text = await Self.collect(source, timeout: timeout), !text.isEmpty else { return (index, nil) }
                     return (index, Attachment.log(text, filename: source.filename))
                 }
             }
@@ -105,6 +111,22 @@ public final class Snag: Sendable {
             return results.sorted { $0.0 < $1.0 }.map(\.1)
         }
         return logs + (crumbs.map { [$0] } ?? [])
+    }
+
+    /// The source's logs, or nil if it takes longer than `timeout`. The read can't be cancelled
+    /// (OSLogStore blocks), so a late one finishes in the background and is dropped.
+    static func collect(_ source: any LogSource, timeout: Duration) async -> String? {
+        let once = Once()
+        return await withCheckedContinuation { continuation in
+            Task.detached(priority: .utility) {
+                let text = await source.collect()
+                if once.claim() { continuation.resume(returning: text) }
+            }
+            Task.detached {
+                try? await Task.sleep(for: timeout)
+                if once.claim() { continuation.resume(returning: nil) }
+            }
+        }
     }
 
     /// Redacts, trims to the size limit, and queues the report. Returns once it's saved on disk;
@@ -185,3 +207,4 @@ public final class Snag: Sendable {
         return result.enumerated().filter { !removed.contains($0.offset) }.map(\.element)
     }
 }
+

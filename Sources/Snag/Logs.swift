@@ -51,7 +51,9 @@ public struct OSLogSource: LogSource {
     func read() -> String? {
         guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return nil }
         let start = store.position(date: Date().addingTimeInterval(-interval))
-        guard let entries = try? store.getEntries(at: start) else { return nil }
+        // Let the store filter by subsystem: walking every entry of a busy process is slow.
+        let predicate = subsystems.isEmpty ? nil : NSPredicate(format: "subsystem IN %@", Array(subsystems))
+        guard let entries = try? store.getEntries(at: start, matching: predicate) else { return nil }
         var lines: [String] = []
         lines.reserveCapacity(min(maxEntries, 512))
         let formatter = ISO8601DateFormatter()
