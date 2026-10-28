@@ -1,5 +1,7 @@
 {{template "head" (dict "Title" "Projects" "Data" .)}}
-<div class="toolbar"><h1>Projects</h1><a class="button" href="/projects/new">New project</a></div>
+<div class="toolbar"><h1>Projects</h1>
+  <form method="post" action="/backup" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="ghost" title="Every project, issue, report and attachment as a .tar.gz; restore with snag-server restore">Download backup</button></form>
+  <a class="button" href="/projects/new">New project</a></div>
 {{if .Cards}}
 <div class="cards">
   {{range .Cards}}

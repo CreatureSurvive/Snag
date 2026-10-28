@@ -193,6 +193,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/forward", s.admin(s.csrf(s.project(s.handleRetryForward))))
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/delete", s.admin(s.csrf(s.project(s.handleDeleteIssue))))
 	s.mux.HandleFunc("POST /p/{slug}/reports/{id}/delete", s.admin(s.csrf(s.project(s.handleDeleteReport))))
+	s.mux.HandleFunc("POST /backup", s.admin(s.csrf(s.handleBackup)))
+	s.mux.HandleFunc("POST /p/{slug}/export", s.admin(s.csrf(s.project(s.handleExport))))
 	s.mux.HandleFunc("GET /reports/{id}", s.admin(s.handleReportRedirect))
 	s.mux.HandleFunc("GET /reports/{id}/files/{name}", s.admin(s.handleFile))
 }

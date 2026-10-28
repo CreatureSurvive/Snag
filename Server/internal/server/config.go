@@ -24,6 +24,11 @@ type Config struct {
 	TrustProxy    bool
 	RetentionDays int
 
+	// BackupDir, when set, receives a backup every BackupHours; the newest BackupKeep are kept.
+	BackupDir   string
+	BackupHours int
+	BackupKeep  int
+
 	// GitHubToken is the default token for projects that forward to GitHub without their own.
 	GitHubToken  string
 	GitHubAPIURL string
@@ -147,6 +152,13 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return cfg, err
 	}
 	if cfg.RetentionDays, err = intVar("SNAG_RETENTION_DAYS", 0); err != nil {
+		return cfg, err
+	}
+	cfg.BackupDir = get("SNAG_BACKUP_DIR", "")
+	if cfg.BackupHours, err = intVar("SNAG_BACKUP_HOURS", 24); err != nil {
+		return cfg, err
+	}
+	if cfg.BackupKeep, err = intVar("SNAG_BACKUP_KEEP", 7); err != nil {
 		return cfg, err
 	}
 	cfg.TrustProxy = get("SNAG_TRUST_PROXY", "") == "true" || get("SNAG_TRUST_PROXY", "") == "1"

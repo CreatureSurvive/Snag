@@ -112,6 +112,13 @@
 </form>
 {{end}}
 
+<form class="panel form" method="post" action="/p/{{.P.Slug}}/export">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2>Export</h2>
+  <p class="hint">This project's settings, issues, reports and attachments as a .tar.gz. Add it to another server with <code>snag-server restore --merge</code>.</p>
+  <div class="row"><button type="submit">Download export</button></div>
+</form>
+
 <form class="panel danger form" method="post" action="/p/{{.P.Slug}}/delete">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <h2>Delete project</h2>

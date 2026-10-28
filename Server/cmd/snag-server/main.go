@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -38,6 +40,10 @@ func main() {
 		case "version", "--version":
 			fmt.Println(version)
 			return
+		case "backup":
+			os.Exit(runBackup(os.Args[2:]))
+		case "restore":
+			os.Exit(runRestore(os.Args[2:]))
 		}
 	}
 
@@ -47,6 +53,12 @@ func main() {
 		logger.Error("configuration", "err", err)
 		os.Exit(2)
 	}
+	release, err := server.LockDataDir(cfg.DataDir)
+	if err != nil {
+		logger.Error("data directory", "dir", cfg.DataDir, "err", err)
+		os.Exit(1)
+	}
+	defer release()
 	srv, err := server.Open(cfg, logger)
 	if err != nil {
 		logger.Error("opening data directory", "dir", cfg.DataDir, "err", err)
@@ -92,6 +104,25 @@ func main() {
 		}()
 	}
 
+	if cfg.BackupDir != "" && cfg.BackupHours > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(cfg.BackupHours) * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if path, err := server.RunScheduledBackup(cfg); err != nil {
+						logger.Error("scheduled backup", "err", err)
+					} else {
+						logger.Info("backup written", "path", path)
+					}
+				}
+			}
+		}()
+	}
+
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv,
@@ -125,4 +156,79 @@ func main() {
 		logger.Error("server", "err", err)
 		os.Exit(1)
 	}
+}
+
+// runBackup writes a backup of SNAG_DATA_DIR to a file or stdout. It's safe while the server runs.
+func runBackup(args []string) int {
+	fs := flag.NewFlagSet("backup", flag.ExitOnError)
+	out := fs.String("o", "-", "output file (- for stdout)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: snag-server backup [-o file.tar.gz]")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	cfg, err := server.LoadConfig(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "configuration:", err)
+		return 2
+	}
+	var w io.Writer = os.Stdout
+	if *out != "-" {
+		f, err := os.OpenFile(*out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer f.Close()
+		w = f
+	}
+	if err := server.WriteBackup(cfg.DataDir, w); err != nil {
+		fmt.Fprintln(os.Stderr, "backup:", err)
+		return 1
+	}
+	return 0
+}
+
+// runRestore loads a backup or project export into SNAG_DATA_DIR. The server must be stopped.
+func runRestore(args []string) int {
+	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	merge := fs.Bool("merge", false, "add the backup's projects to the existing data")
+	replace := fs.Bool("replace", false, "move the existing data into <data>/replaced-<time>/ first")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: snag-server restore [--merge | --replace] file.tar.gz (- for stdin)")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 || (*merge && *replace) {
+		fs.Usage()
+		return 2
+	}
+	cfg, err := server.LoadConfig(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "configuration:", err)
+		return 2
+	}
+	release, err := server.LockDataDir(cfg.DataDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer release()
+	var r io.Reader = os.Stdin
+	if name := fs.Arg(0); name != "-" {
+		f, err := os.Open(name)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer f.Close()
+		r = f
+	}
+	summary, err := server.Restore(cfg, r, server.RestoreOptions{Merge: *merge, Replace: *replace})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "restore:", err)
+		return 1
+	}
+	fmt.Println("restored", summary)
+	return 0
 }

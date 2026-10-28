@@ -912,3 +912,14 @@ func (is *IssueStore) Similar(issue *Issue, text func(*Issue) string, limit int)
 	}
 	return out
 }
+
+// Count is the number of issues across all projects.
+func (is *IssueStore) Count() int {
+	is.mu.RLock()
+	defer is.mu.RUnlock()
+	n := 0
+	for _, issues := range is.issues {
+		n += len(issues)
+	}
+	return n
+}

@@ -10,16 +10,16 @@ import (
 func TestRedactorMatchesClientRules(t *testing.T) {
 	r := NewRedactor(RedactStandard)
 	cases := map[string]string{
-		"Authorization: Bearer abcdefghijklmnop1234":  "Authorization: Bearer [redacted:bearer]",
-		"password=hunter2&user=me":                    "password=[redacted:secret]&user=me",
-		`{"api_key": "sk_live_123456"}`:               `{"api_key": "[redacted:secret]"}`,
-		"see https://bob:pa55@example.com/x":          "see https://[redacted:credentials]@example.com/x",
-		"card 4242 4242 4242 4242 ok":                 "card [redacted:card] ok",
-		"order 1234567890123 isn't a card":            "order 1234567890123 isn't a card",
+		"Authorization: Bearer abcdefghijklmnop1234":   "Authorization: Bearer [redacted:bearer]",
+		"password=hunter2&user=me":                     "password=[redacted:secret]&user=me",
+		`{"api_key": "sk_live_123456"}`:                `{"api_key": "[redacted:secret]"}`,
+		"see https://bob:pa55@example.com/x":           "see https://[redacted:credentials]@example.com/x",
+		"card 4242 4242 4242 4242 ok":                  "card [redacted:card] ok",
+		"order 1234567890123 isn't a card":             "order 1234567890123 isn't a card",
 		"jwt eyJhbGciOi.eyJzdWIiOiIx.c2lnbmF0dXJl end": "jwt [redacted:jwt] end",
-		"mail me@example.com":                         "mail me@example.com",
-		"Bearer [redacted:bearer]":                    "Bearer [redacted:bearer]",
-		"password=[redacted:secret]":                  "password=[redacted:secret]",
+		"mail me@example.com":                          "mail me@example.com",
+		"Bearer [redacted:bearer]":                     "Bearer [redacted:bearer]",
+		"password=[redacted:secret]":                   "password=[redacted:secret]",
 	}
 	for in, want := range cases {
 		if got := r.Text(in); got != want {

@@ -396,3 +396,18 @@ func LoadProjectsFile(path string, getenv func(string) string) ([]ProjectSeed, e
 	}
 	return seeds, nil
 }
+
+// addRestored adds projects merged in from a backup.
+func (ps *ProjectStore) addRestored(list []*Project) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	for _, p := range list {
+		if _, exists := ps.projects[p.Slug]; exists {
+			return fmt.Errorf("project %q already exists here", p.Slug)
+		}
+	}
+	for _, p := range list {
+		ps.projects[p.Slug] = p
+	}
+	return ps.saveLocked()
+}
