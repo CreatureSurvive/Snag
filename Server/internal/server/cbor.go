@@ -4,21 +4,28 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 // decodeCBOR decodes the subset of CBOR that App Attest uses: unsigned and negative integers,
 // byte and text strings, arrays and maps (definite lengths only). Maps decode to
 // map[string]any; byte strings to []byte.
 func decodeCBOR(data []byte) (any, error) {
-	d := cborDecoder{data: data}
-	v, err := d.value(0)
+	v, n, err := decodeCBORPrefix(data)
 	if err != nil {
 		return nil, err
 	}
-	if d.pos != len(d.data) {
+	if n != len(data) {
 		return nil, errors.New("cbor: trailing bytes")
 	}
 	return v, nil
+}
+
+// decodeCBORPrefix decodes one value from the start of data and says how many bytes it used.
+func decodeCBORPrefix(data []byte) (any, int, error) {
+	d := cborDecoder{data: data}
+	v, err := d.value(0)
+	return v, d.pos, err
 }
 
 type cborDecoder struct {
@@ -105,9 +112,16 @@ func (d *cborDecoder) value(depth int) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			key, ok := k.(string)
-			if !ok {
-				return nil, errors.New("cbor: non-string map key")
+			var key string
+			switch k := k.(type) {
+			case string:
+				key = k
+			case uint64: // COSE keys use integer labels: 1, 3, -1, -2...
+				key = strconv.FormatUint(k, 10)
+			case int64:
+				key = strconv.FormatInt(k, 10)
+			default:
+				return nil, errors.New("cbor: unsupported map key")
 			}
 			v, err := d.value(depth + 1)
 			if err != nil {

@@ -65,8 +65,13 @@ func TestDashboardRequiresAuth(t *testing.T) {
 	for _, path := range []string{"/", "/p/gelo", "/p/gelo/issues/1", "/p/gelo/settings", "/api/v1/reports", "/api/v1/projects"} {
 		rr := httptest.NewRecorder()
 		srv.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
-		if rr.Code != 401 {
-			t.Fatalf("%s: %d", path, rr.Code)
+		// Pages send browsers to the sign-in page; the API asks for Basic auth.
+		if strings.HasPrefix(path, "/api/") {
+			if rr.Code != 401 || rr.Header().Get("WWW-Authenticate") == "" {
+				t.Fatalf("%s: %d", path, rr.Code)
+			}
+		} else if rr.Code != 303 || !strings.HasPrefix(rr.Header().Get("Location"), "/login?next=") {
+			t.Fatalf("%s: %d %s", path, rr.Code, rr.Header().Get("Location"))
 		}
 	}
 	cfg := testConfig(t)

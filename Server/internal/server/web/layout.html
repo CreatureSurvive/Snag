@@ -14,6 +14,7 @@
     {{range .Data.AllProjects}}<a href="/p/{{.Slug}}" {{if and $.Data.P (eq .Slug $.Data.P.Slug)}}aria-current="page"{{end}}>{{.Name}}</a>{{end}}
     <a class="add" href="/projects/new" title="New project">+</a>
   </nav>
+  <a class="account" href="/account">Account</a>
 </header>
 <main>
 {{end}}

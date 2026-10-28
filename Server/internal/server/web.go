@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,13 +16,21 @@ import (
 	"time"
 )
 
-//go:embed web/*.html web/style.css
+//go:embed web/*.html web/style.css web/*.js
 var webFS embed.FS
 
-// cssVersion changes whenever the stylesheet does, so browsers never use a stale copy.
+// cssVersion changes whenever the stylesheet or a script does, so browsers never use a stale
+// copy of these immutable-cached assets.
 var cssVersion = func() string {
-	data, _ := webFS.ReadFile("web/style.css")
-	return hashKey(string(data))[:10]
+	var all strings.Builder
+	css, _ := webFS.ReadFile("web/style.css")
+	all.Write(css)
+	scripts, _ := fs.Glob(webFS, "web/*.js")
+	for _, name := range scripts {
+		data, _ := webFS.ReadFile(name)
+		all.Write(data)
+	}
+	return hashKey(all.String())[:10]
 }()
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
@@ -86,7 +95,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	},
 }).ParseFS(webFS, "web/*.html"))
 
-const dashboardCSP = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+const dashboardCSP = "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self' blob:; media-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 
 func (s *Server) render(w http.ResponseWriter, name string, data map[string]any) {
 	data["CSRF"] = s.csrfToken()
@@ -102,6 +111,23 @@ func (s *Server) render(w http.ResponseWriter, name string, data map[string]any)
 func (s *Server) handleStyle(w http.ResponseWriter, r *http.Request) {
 	data, _ := webFS.ReadFile("web/style.css")
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(data)
+}
+
+// handleScript serves the dashboard's own scripts (sign-in with passkeys, keyboard shortcuts).
+func (s *Server) handleScript(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !strings.HasSuffix(name, ".js") || strings.ContainsAny(name, "/\\") {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := webFS.ReadFile("web/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	_, _ = w.Write(data)
 }

@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +36,7 @@ type Server struct {
 	github    *GitHubSync
 	attestor  *Attestor
 	symbols   *SymbolStore
+	auth      *Auth
 	// boardSecret keys voter hashes on the ideas board.
 	boardSecret []byte
 	log         *slog.Logger
@@ -70,8 +72,13 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	auth, err := OpenAuth(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		boardSecret: boardSecret,
+		auth:        auth,
 		attestor:    attestor,
 		symbols:     OpenSymbols(cfg.DataDir),
 		cfg:         cfg,
@@ -189,6 +196,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/projects/{slug}/issues/{n}/messages", s.admin(s.handleAPIThreadMessage))
 
 	s.mux.HandleFunc("GET /static/style.css", s.handleStyle)
+	s.mux.HandleFunc("GET /static/{name}", s.handleScript)
+	s.mux.HandleFunc("GET /login", s.handleLoginPage)
+	s.mux.HandleFunc("POST /login", s.handleLogin)
+	s.mux.HandleFunc("POST /login/passkey/begin", s.handlePasskeyLoginBegin)
+	s.mux.HandleFunc("POST /login/passkey/finish", s.handlePasskeyLoginFinish)
+	s.mux.HandleFunc("POST /logout", s.admin(s.csrf(s.handleLogout)))
+	s.mux.HandleFunc("GET /account", s.admin(s.handleAccount))
+	s.mux.HandleFunc("POST /account/passkeys/begin", s.admin(s.csrfHeader(s.handlePasskeyRegisterBegin)))
+	s.mux.HandleFunc("POST /account/passkeys/finish", s.admin(s.csrfHeader(s.handlePasskeyRegisterFinish)))
+	s.mux.HandleFunc("POST /account/passkeys/{id}/delete", s.admin(s.csrf(s.handleDeletePasskey)))
+	s.mux.HandleFunc("POST /account/sessions/end", s.admin(s.csrf(s.handleSignOutEverywhere)))
 	s.mux.HandleFunc("GET /{$}", s.admin(s.handleOverview))
 	s.mux.HandleFunc("GET /projects/new", s.admin(s.handleNewProject))
 	s.mux.HandleFunc("POST /projects", s.admin(s.csrf(s.handleCreateProject)))
@@ -623,6 +641,11 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "The dashboard is disabled. Set SNAG_ADMIN_PASSWORD to enable it.", http.StatusForbidden)
 			return
 		}
+		if s.auth.Valid(s.sessionToken(r)) {
+			next(w, r)
+			return
+		}
+		// Scripts and the JSON API can use HTTP Basic auth.
 		user, pass, ok := r.BasicAuth()
 		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.cfg.AdminUser)) == 1
 		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(s.cfg.AdminPassword)) == 1
@@ -630,6 +653,11 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			if ok {
 				// Slow down guessing.
 				time.Sleep(300 * time.Millisecond)
+			}
+			if !ok && !strings.HasPrefix(r.URL.Path, "/api/") {
+				// A browser: send it to the sign-in page instead of the Basic auth prompt.
+				http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
+				return
 			}
 			w.Header().Set("WWW-Authenticate", `Basic realm="Snag", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)

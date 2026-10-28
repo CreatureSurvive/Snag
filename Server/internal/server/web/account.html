@@ -1,0 +1,33 @@
+{{template "head" (dict "Title" "Account" "Data" .)}}
+<script src="/static/passkeys.js?v={{cssVersion}}" defer></script>
+<h1>Account</h1>
+{{with .Flash}}<p class="flash">{{.}}</p>{{end}}
+
+<section class="panel">
+  <h2>Passkeys</h2>
+  <p class="hint">Sign in with Face ID, Touch ID, a security key or a phone instead of the password. Passkeys are tied to <code>{{.RPID}}</code>; set <code>SNAG_PUBLIC_URL</code> to the address you sign in at.</p>
+  {{if .Passkeys}}
+  <table class="context">
+    {{range .Passkeys}}
+    <tr><th>{{.Name}}</th><td>added {{ago .CreatedAt}}{{if not .LastUsedAt.IsZero}} · last used {{ago .LastUsedAt}}{{end}}
+      <form method="post" action="/account/passkeys/{{.ID}}/delete" class="inline danger"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="ghost">Remove</button></form>
+    </td></tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted">No passkeys yet.</p>{{end}}
+  <div class="form row">
+    <input id="passkey-name" placeholder="Name, e.g. MacBook" aria-label="Passkey name" maxlength="60">
+    <button type="button" id="passkey-add" data-csrf="{{.CSRF}}">Add a passkey</button>
+  </div>
+  <p class="error" id="passkey-error" role="alert" hidden></p>
+</section>
+
+<section class="panel">
+  <h2>Sessions</h2>
+  <p class="hint">Signing in keeps this browser signed in for 30 days. Scripts can keep using HTTP Basic auth with the admin password.</p>
+  <div class="row">
+    <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Sign out</button></form>
+    <form method="post" action="/account/sessions/end" class="inline danger"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Sign out everywhere</button></form>
+  </div>
+</section>
+{{template "foot"}}

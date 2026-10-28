@@ -83,7 +83,7 @@ func TestCBORRoundTrip(t *testing.T) {
 	if m["fmt"] != "x" || m["n"] != uint64(300) || len(m["big"].([]byte)) != 70000 || m["list"].([]any)[1] != "a" {
 		t.Fatalf("round trip %v", m["list"])
 	}
-	for _, bad := range [][]byte{{0x5f}, {0x45, 1}, {0x82, 1}, {0xa1, 1, 2}, append(encodeCBOR("a"), 0)} {
+	for _, bad := range [][]byte{{0x5f}, {0x45, 1}, {0x82, 1}, {0xa1, 0x81, 1, 2}, append(encodeCBOR("a"), 0)} {
 		if _, err := decodeCBOR(bad); err == nil {
 			t.Errorf("accepted % x", bad)
 		}

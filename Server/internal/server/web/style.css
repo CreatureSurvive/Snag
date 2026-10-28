@@ -213,3 +213,12 @@ body.board .intro { color: var(--muted); font-size: 1.05em; }
 .state-planned { color: #1971c2; border-color: color-mix(in srgb, #1971c2 40%, transparent); }
 .state-in_progress { color: #e8590c; border-color: color-mix(in srgb, #e8590c 40%, transparent); }
 .state-done { color: #2f9e44; border-color: color-mix(in srgb, #2f9e44 40%, transparent); }
+
+/* Sign-in */
+body.login main { max-width: 380px; margin: 10vh auto; padding: 0 20px; }
+body.login h1 { text-align: center; }
+button.wide { width: 100%; padding: 12px; }
+button.primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+.or { text-align: center; color: var(--muted); margin: 16px 0; }
+p.error { color: #e03131; }
+.top .account { margin-left: auto; color: var(--muted); white-space: nowrap; }

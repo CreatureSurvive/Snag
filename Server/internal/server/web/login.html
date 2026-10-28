@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sign in · Snag</title>
+<link rel="stylesheet" href="/static/style.css?v={{cssVersion}}">
+<script src="/static/passkeys.js?v={{cssVersion}}" defer></script>
+</head>
+<body class="login">
+<main>
+  <h1>Snag</h1>
+  {{if .Disabled}}
+  <p>The dashboard is disabled. Set <code>SNAG_ADMIN_PASSWORD</code> to enable it.</p>
+  {{else}}
+  {{with .Error}}<p class="flash error" role="alert">{{.}}</p>{{end}}
+  {{if .HasPasskeys}}
+  <button type="button" id="passkey-login" class="primary wide" data-next="{{.Next}}">Sign in with a passkey</button>
+  <p class="error" id="passkey-error" role="alert" hidden></p>
+  <p class="or"><span>or</span></p>
+  {{end}}
+  <form method="post" action="/login" class="panel form">
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label>User <input name="user" autocomplete="username" required value="admin"></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required autofocus></label>
+    <button type="submit">Sign in</button>
+  </form>
+  {{end}}
+</main>
+</body>
+</html>
