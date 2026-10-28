@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Snag**: Send no longer waits on slow log collection. Each log source gets `logTimeout`
+  (5 seconds by default) and is left out if it runs over, and `OSLogSource` lets the log store
+  filter by subsystem instead of reading every entry. On a busy device the form could sit on
+  "Sending" until the app's logs were read.
+- **SnagUI**: scrolling the report form or a conversation dismisses the keyboard; the Mark Up
+  editor's title is readable in light mode.
+- **Server**: device uptime reads "50 days, 12 hr"; the activity timeline's kind column no longer
+  overlaps its badge.
+- README screenshots, regenerated with `Scripts/screenshots/capture.sh`.
+
 ## 1.0.0
 
 - **Snag**: reports with attachments and context, `TextRedactor`, context and log collection,

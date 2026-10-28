@@ -20,6 +20,19 @@ the reports.
   notifications, two-way GitHub sync, conversations with reporters in the app and by email, a
   public ideas board with votes, and App Attest to reject forged reports.
 
+<p align="center">
+  <img src="docs/screenshots/app-form.png" width="19%" alt="The report form, with a screenshot attached">
+  <img src="docs/screenshots/app-markup.png" width="19%" alt="Marking up the screenshot; the private email and password are already black">
+  <img src="docs/screenshots/app-included.png" width="19%" alt="What's Included: everything the report will send">
+  <img src="docs/screenshots/app-conversation.png" width="19%" alt="My Reports: a conversation with the developer">
+  <img src="docs/screenshots/app-ideas.png" width="19%" alt="The ideas board in the app">
+</p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-issues-dark.png">
+  <img src="docs/screenshots/dashboard-issues.png" alt="The dashboard's issue list">
+</picture>
+
 ```swift
 import Snag
 import SnagUI
@@ -246,6 +259,11 @@ cd Server && cp .env.example .env    # set SNAG_ADMIN_PASSWORD and SNAG_PUBLIC_U
 docker compose up -d
 ```
 
+<p align="center">
+  <img src="docs/screenshots/dashboard-issue.png" width="64%" alt="An issue: the redacted screenshot, device details and the activity before the report">
+  <img src="docs/screenshots/dashboard-board.png" width="34%" alt="The public ideas board">
+</p>
+
 Open the dashboard, create a project and copy its ingest key into `SnagServerSink`. Data lives in
 the `/data` volume as plain JSON files plus attachments, so it's easy to back up.
 
@@ -424,6 +442,7 @@ node --test Server/internal/server/sdk/snag.test.mjs   # web SDK redaction and U
 Scripts/check-strings.py      # string catalogs match the code, every language complete
 Scripts/live-test.sh          # Swift client against the real Docker image
 Scripts/ui-test.sh            # Example app UI tests against a local server (iOS or tvOS)
+Scripts/screenshots/capture.sh   # regenerate docs/screenshots against a fresh demo server
 ```
 
 To run the example app on a device, set your Team ID when generating the project:
