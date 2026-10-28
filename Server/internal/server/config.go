@@ -24,6 +24,9 @@ type Config struct {
 	TrustProxy    bool
 	RetentionDays int
 
+	// InboundEmailSecret enables POST /api/v1/inbound-email for reporters' email replies.
+	InboundEmailSecret string
+
 	// BackupDir, when set, receives a backup every BackupHours; the newest BackupKeep are kept.
 	BackupDir   string
 	BackupHours int
@@ -62,7 +65,8 @@ type SMTPConfig struct {
 	Password string
 	From     string
 	To       []string
-	// ReplyTo is set on replies to reporters, so their answers reach you.
+	// ReplyTo is set on replies to reporters, so their answers reach you. With
+	// SNAG_INBOUND_EMAIL_SECRET it gets a per-report plus-tag (support+r…@example.com).
 	ReplyTo string
 	// TLS is "starttls" (default), "tls" (implicit, port 465) or "none" (local relays only).
 	TLS string
@@ -152,6 +156,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return cfg, err
 	}
 	if cfg.RetentionDays, err = intVar("SNAG_RETENTION_DAYS", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.InboundEmailSecret, err = secret("SNAG_INBOUND_EMAIL_SECRET"); err != nil {
 		return cfg, err
 	}
 	cfg.BackupDir = get("SNAG_BACKUP_DIR", "")

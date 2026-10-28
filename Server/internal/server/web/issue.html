@@ -90,11 +90,11 @@
 
     {{$thread := $i.ThreadFor $r.ID}}
     <details {{if $thread}}open{{end}}>
-      <summary>In-app messages{{with $thread}} ({{len .}}){{end}}</summary>
+      <summary>Conversation{{with $thread}} ({{len .}}){{end}}</summary>
       {{range $thread}}
       <div class="msg msg-{{.From}}">
         <div class="message">{{.Text}}</div>
-        <span class="muted">{{if eq .From "team"}}You{{if not .ReportID}} · to all reporters{{end}}{{else}}Reporter{{end}} · {{datetime .At}}</span>
+        <span class="muted">{{if eq .From "team"}}You{{if not .ReportID}} · to all reporters{{end}}{{else}}Reporter{{end}}{{if eq .Via "email"}} · by email{{end}} · {{datetime .At}}</span>
       </div>
       {{end}}
       <form class="form" method="post" action="{{$self}}/thread">

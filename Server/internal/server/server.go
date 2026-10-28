@@ -165,6 +165,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
 	s.mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
 	s.mux.HandleFunc("POST /api/v1/symbols", s.handleSymbolsUpload)
+	s.mux.HandleFunc("POST /api/v1/inbound-email", s.handleInboundEmail)
 	s.mux.HandleFunc("POST /api/v1/attest/challenge", s.handleAttestChallenge)
 	s.mux.HandleFunc("POST /api/v1/attest/keys", s.handleAttestKey)
 	s.mux.HandleFunc("GET /api/v1/followup/{id}", s.handleFollowUp)

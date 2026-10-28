@@ -503,7 +503,9 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown report", http.StatusBadRequest)
 		return
 	}
-	msg, err := BuildReply(*s.cfg.SMTP, rec.Contact, r.FormValue("subject"), r.FormValue("body"), rec.ID)
+	smtp := *s.cfg.SMTP
+	smtp.ReplyTo = s.replyAddress(rec.ID)
+	msg, err := BuildReply(smtp, rec.Contact, r.FormValue("subject"), r.FormValue("body"), rec.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -516,6 +518,11 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = s.issues.Update(p.Slug, issue.Number, func(i *Issue) error {
+		// Part of the conversation, so the reporter also sees it in the app and replies thread.
+		if AddThreadMessage(i, FromTeam, rec.ID, r.FormValue("body")) == nil {
+			i.Thread[len(i.Thread)-1].Via = "email"
+			i.Activity = i.Activity[:len(i.Activity)-1]
+		}
 		i.log("reply", "Emailed the reporter (%s): %s", rec.Contact, truncate(strings.TrimSpace(r.FormValue("body")), 500))
 		return nil
 	})

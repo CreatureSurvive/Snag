@@ -923,3 +923,12 @@ func (is *IssueStore) Count() int {
 	}
 	return n
 }
+
+// Current returns an issue, following merges to the issue that absorbed it.
+func (is *IssueStore) Current(project string, number int) (*Issue, error) {
+	issue, err := is.Get(project, number)
+	for hops := 0; err == nil && issue.MergedInto != 0 && hops < 10; hops++ {
+		issue, err = is.Get(project, issue.MergedInto)
+	}
+	return issue, err
+}

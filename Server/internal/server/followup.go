@@ -24,6 +24,10 @@ type ThreadMessage struct {
 	// ReportID addresses one reporter; "" means every reporter of the issue.
 	ReportID string `json:"reportId,omitempty"`
 	Text     string `json:"text"`
+	// Via is "email" for messages sent or received by email; "" is the app.
+	Via string `json:"via,omitempty"`
+	// ExternalID is an email's Message-ID, so a redelivered message isn't added twice.
+	ExternalID string `json:"externalId,omitempty"`
 }
 
 const (
@@ -102,9 +106,10 @@ func reporterStatus(issue *Issue, reportID string) ReporterStatus {
 	if st.Messages == nil {
 		st.Messages = []ThreadMessage{}
 	}
-	// Reporters don't see whether a message was addressed to them alone.
+	// Reporters don't see whether a message was addressed to them alone, or email details.
 	for i := range st.Messages {
 		st.Messages[i].ReportID = ""
+		st.Messages[i].ExternalID = ""
 	}
 	return st
 }
@@ -124,10 +129,7 @@ func (s *Server) followUpRecord(w http.ResponseWriter, r *http.Request) (*Record
 		fail(w, http.StatusTooManyRequests, "too many requests")
 		return nil, nil, false
 	}
-	issue, err := s.issues.Get(rec.Project, rec.Issue)
-	for hops := 0; err == nil && issue.MergedInto != 0 && hops < 10; hops++ {
-		issue, err = s.issues.Get(rec.Project, issue.MergedInto)
-	}
+	issue, err := s.issues.Current(rec.Project, rec.Issue)
 	if err != nil {
 		fail(w, http.StatusNotFound, "not found")
 		return nil, nil, false
