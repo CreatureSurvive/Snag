@@ -5,27 +5,66 @@
 
 {{if .NewKey}}
 <div class="panel key-reveal">
+  {{if eq .NewKeyScope "symbols"}}
+  <h2>New symbol upload token</h2>
+  <p>Copy it now; it isn't shown again. Keep it in CI secrets, not in the app.</p>
+  <pre class="key">{{.NewKey}}</pre>
+  <pre class="log">SNAG_SYMBOLS_TOKEN={{.NewKey}} SNAG_URL={{if .Ingest}}{{.Ingest}}{{else}}https://your-snag-server{{end}} Scripts/upload-symbols.sh</pre>
+  {{else}}
   <h2>New ingest key</h2>
   <p>Copy it now; it isn't shown again.</p>
   <pre class="key">{{.NewKey}}</pre>
   <pre class="log">SnagServerSink(url: URL(string: "{{if .Ingest}}{{.Ingest}}{{else}}https://your-snag-server{{end}}")!, apiKey: "{{.NewKey}}")</pre>
+  {{end}}
 </div>
 {{end}}
 
 <section class="panel">
   <h2>Ingest keys</h2>
   <table class="context">
-    {{range .P.Keys}}
+    {{range .P.Keys}}{{if not .Scope}}
     <tr><th>{{.Label}}</th><td><code>{{.Prefix}}…</code> · created {{ago .CreatedAt}}
       <form method="post" action="/p/{{$.P.Slug}}/keys/{{.ID}}/revoke" class="inline danger"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="ghost">Revoke</button></form>
     </td></tr>
-    {{end}}
+    {{end}}{{end}}
     {{if .P.ConfigKeyCount}}<tr><th>From server config</th><td>{{.P.ConfigKeyCount}} key{{if gt .P.ConfigKeyCount 1}}s{{end}} (change in <code>SNAG_API_KEYS</code> or the projects file)</td></tr>{{end}}
   </table>
   <form method="post" action="/p/{{.P.Slug}}/keys" class="form row">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input name="label" placeholder="Label, e.g. iOS 2.1" aria-label="Key label" maxlength="60">
     <button type="submit">Create key</button>
+  </form>
+</section>
+
+<section class="panel" id="symbols">
+  <h2>Crash symbols</h2>
+  <p class="hint">Upload your app's dSYMs so crash and hang reports show function names and source lines. Uploading symbols later also symbolicates earlier reports that were missing them.</p>
+  {{if .Symbols}}
+  <table class="context">
+    {{range .Symbols}}
+    <tr><th>{{.Binary}} <span class="muted">{{.Arch}}</span></th><td><code>{{.UUID}}</code> · {{bytes .Size}} · {{ago .UploadedAt}}
+      <form method="post" action="/p/{{$.P.Slug}}/symbols/{{.UUID}}/delete" class="inline danger"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="ghost">Delete</button></form>
+    </td></tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted">No symbols yet.</p>{{end}}
+  <form method="post" action="/p/{{.P.Slug}}/symbols" enctype="multipart/form-data" class="form row">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="file" name="file" accept=".zip,application/zip" aria-label="Zipped dSYM">
+    <button type="submit">Upload dSYM</button>
+  </form>
+  <h3>Upload tokens</h3>
+  <table class="context">
+    {{range .P.Keys}}{{if eq .Scope "symbols"}}
+    <tr><th>{{.Label}}</th><td><code>{{.Prefix}}…</code> · created {{ago .CreatedAt}}
+      <form method="post" action="/p/{{$.P.Slug}}/keys/{{.ID}}/revoke" class="inline danger"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="ghost">Revoke</button></form>
+    </td></tr>
+    {{end}}{{end}}
+  </table>
+  <form method="post" action="/p/{{.P.Slug}}/symbol-keys" class="form row">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input name="label" placeholder="Label, e.g. CI" aria-label="Token label" maxlength="60">
+    <button type="submit">Create upload token</button>
   </form>
 </section>
 

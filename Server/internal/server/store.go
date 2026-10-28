@@ -67,6 +67,8 @@ type Record struct {
 	Attested bool `json:"attested,omitempty"`
 	// ServerRedactions counts secrets the server removed that the app had missed.
 	ServerRedactions int `json:"serverRedactions,omitempty"`
+	// Symbolication is set for MetricKit crash and hang reports.
+	Symbolication *Symbolication `json:"symbolication,omitempty"`
 }
 
 type StoredFile struct {
@@ -374,4 +376,38 @@ func (s *Store) Matches(ids []string, q string) bool {
 		}
 	}
 	return false
+}
+
+// PutFile adds or replaces a server-generated file in a stored report. The new file comes first.
+func (s *Store) PutFile(id string, file StoredFile, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.records[strings.ToLower(id)]
+	if !ok {
+		return ErrNotFound
+	}
+	if file.Name == "" || file.Name == "report.json" || strings.ContainsAny(file.Name, "/\\") {
+		return errors.New("bad file name")
+	}
+	path := filepath.Join(s.reportDir(rec.ID), file.Name)
+	if err := os.WriteFile(path+".tmp", data, 0o640); err != nil {
+		return err
+	}
+	if err := os.Rename(path+".tmp", path); err != nil {
+		return err
+	}
+	updated := rec.clone()
+	file.Size = int64(len(data))
+	files := []StoredFile{file}
+	for _, f := range updated.Files {
+		if f.Name != file.Name {
+			files = append(files, f)
+		}
+	}
+	updated.Files = files
+	if err := writeJSON(filepath.Join(s.reportDir(updated.ID), "report.json"), updated); err != nil {
+		return err
+	}
+	s.records[updated.ID] = updated
+	return nil
 }

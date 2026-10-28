@@ -127,6 +127,16 @@ func (s *Server) WriteProjectExport(slug string, w io.Writer) error {
 				}
 			}
 		}
+		syms, _ := os.ReadDir(filepath.Join(dir, "symbols", slug))
+		for _, u := range syms {
+			for _, name := range []string{"meta.json", "macho"} {
+				if _, err := os.Stat(filepath.Join(dir, "symbols", slug, u.Name(), name)); err == nil {
+					if err := add("symbols/" + slug + "/" + u.Name() + "/" + name); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		for _, id := range reports {
 			files, _ := os.ReadDir(filepath.Join(dir, "reports", id))
 			for _, f := range files {
@@ -207,8 +217,8 @@ func allowedInBackup(name string) bool {
 		return ValidID(parts[1])
 	case parts[0] == "issues" && len(parts) == 3:
 		return slugPattern.MatchString(parts[1])
-	case parts[0] == "symbols":
-		return true
+	case parts[0] == "symbols" && len(parts) == 4:
+		return slugPattern.MatchString(parts[1]) && ValidID(parts[2]) && (parts[3] == "macho" || parts[3] == "meta.json")
 	}
 	return false
 }
@@ -314,6 +324,14 @@ func mergeInto(cfg Config, scratch string, incoming *Server) error {
 				return err
 			}
 		}
+		if src := filepath.Join(scratch, "symbols", p.Slug); dirExists(src) {
+			if err := os.MkdirAll(filepath.Join(cfg.DataDir, "symbols"), 0o750); err != nil {
+				return err
+			}
+			if err := os.Rename(src, filepath.Join(cfg.DataDir, "symbols", p.Slug)); err != nil {
+				return err
+			}
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "reports"), 0o750); err != nil {
 		return err
@@ -382,4 +400,9 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if err := s.WriteProjectExport(p.Slug, w); err != nil {
 		s.log.Error("project export", "project", p.Slug, "err", err)
 	}
+}
+
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }

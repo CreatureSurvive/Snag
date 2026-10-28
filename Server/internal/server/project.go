@@ -36,14 +36,17 @@ type Project struct {
 	FromConfig bool `json:"fromConfig,omitempty"`
 
 	// configKeys are hashes of keys from the environment or projects file; never stored.
-	configKeys []string
+	configKeys       []string
+	configSymbolKeys []string
 }
 
 type APIKey struct {
-	ID        string    `json:"id"`
-	Label     string    `json:"label"`
-	Prefix    string    `json:"prefix"` // first characters, to recognize a key
-	Hash      string    `json:"hash"`   // sha256 hex
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Prefix string `json:"prefix"` // first characters, to recognize a key
+	Hash   string `json:"hash"`   // sha256 hex
+	// Scope is "" for ingest keys and "symbols" for dSYM upload tokens.
+	Scope     string    `json:"scope,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -117,6 +120,7 @@ type ProjectSeed struct {
 	Slug            string            `json:"slug"`
 	Name            string            `json:"name"`
 	Keys            []string          `json:"keys"`
+	SymbolKeys      []string          `json:"symbolKeys,omitempty"`
 	Forwarding      ProjectForwarding `json:"forwarding"`
 	Notify          *NotifyConfig     `json:"notify,omitempty"`
 	Attest          *AttestConfig     `json:"attest,omitempty"`
@@ -170,6 +174,9 @@ func OpenProjects(dataDir string, seeds []ProjectSeed) (*ProjectStore, error) {
 			ps.projects[slug] = p
 			changed = true
 		}
+		for _, key := range seed.SymbolKeys {
+			p.configSymbolKeys = append(p.configSymbolKeys, hashKey(key))
+		}
 		for _, key := range seed.Keys {
 			p.configKeys = append(p.configKeys, hashKey(key))
 		}
@@ -195,9 +202,41 @@ func OpenProjects(dataDir string, seeds []ProjectSeed) (*ProjectStore, error) {
 func (p *Project) allHashes() []string {
 	hashes := append([]string{}, p.configKeys...)
 	for _, k := range p.Keys {
-		hashes = append(hashes, k.Hash)
+		if k.Scope == "" {
+			hashes = append(hashes, k.Hash)
+		}
 	}
 	return hashes
+}
+
+// KeyScopeSymbols marks a key that can upload dSYMs but not reports.
+const KeyScopeSymbols = "symbols"
+
+// AuthenticateSymbols returns the project owning a symbol upload token.
+func (ps *ProjectStore) AuthenticateSymbols(key string) (*Project, bool) {
+	if key == "" {
+		return nil, false
+	}
+	h := []byte(hashKey(key))
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	var match *Project
+	for _, p := range ps.projects {
+		for _, k := range p.Keys {
+			if k.Scope == KeyScopeSymbols && subtle.ConstantTimeCompare(h, []byte(k.Hash)) == 1 {
+				match = p
+			}
+		}
+		for _, candidate := range p.configSymbolKeys {
+			if subtle.ConstantTimeCompare(h, []byte(candidate)) == 1 {
+				match = p
+			}
+		}
+	}
+	if match == nil {
+		return nil, false
+	}
+	return match.clone(), true
 }
 
 // ConfigKeyCount is how many keys come from configuration (shown read-only).
@@ -208,6 +247,7 @@ func (p *Project) clone() *Project {
 	var c Project
 	_ = json.Unmarshal(data, &c)
 	c.configKeys = append([]string{}, p.configKeys...)
+	c.configSymbolKeys = append([]string{}, p.configSymbolKeys...)
 	return &c
 }
 
@@ -320,12 +360,17 @@ func (ps *ProjectStore) Update(slug string, fn func(*Project) error) (*Project, 
 
 // AddKey creates a key and returns its plaintext, which is never stored.
 func (ps *ProjectStore) AddKey(slug, label string) (string, error) {
+	return ps.AddScopedKey(slug, label, "")
+}
+
+// AddScopedKey creates a key with a scope ("" for ingest, KeyScopeSymbols).
+func (ps *ProjectStore) AddScopedKey(slug, label, scope string) (string, error) {
 	key := NewKey()
 	_, err := ps.Update(slug, func(p *Project) error {
 		if label = strings.TrimSpace(label); label == "" {
 			label = "Key " + time.Now().UTC().Format("2006-01-02")
 		}
-		p.Keys = append(p.Keys, APIKey{ID: newID(), Label: truncate(label, 60), Prefix: key[:9], Hash: hashKey(key), CreatedAt: time.Now().UTC()})
+		p.Keys = append(p.Keys, APIKey{ID: newID(), Label: truncate(label, 60), Prefix: key[:9], Hash: hashKey(key), CreatedAt: time.Now().UTC(), Scope: scope})
 		return nil
 	})
 	if err != nil {

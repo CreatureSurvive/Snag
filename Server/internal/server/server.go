@@ -34,6 +34,7 @@ type Server struct {
 	notifier  *Notifier
 	github    *GitHubSync
 	attestor  *Attestor
+	symbols   *SymbolStore
 	log       *slog.Logger
 	limiter   *rateLimiter
 	csrfKey   []byte
@@ -65,6 +66,7 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	_, _ = rand.Read(key)
 	s := &Server{
 		attestor: attestor,
+		symbols:  OpenSymbols(cfg.DataDir),
 		cfg:      cfg,
 		store:    store,
 		projects: projects,
@@ -145,6 +147,7 @@ func (s *Server) Projects() *ProjectStore { return s.projects }
 func (s *Server) Issues() *IssueStore     { return s.issues }
 func (s *Server) Notifier() *Notifier     { return s.notifier }
 func (s *Server) GitHub() *GitHubSync     { return s.github }
+func (s *Server) Symbols() *SymbolStore   { return s.symbols }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -161,6 +164,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reports", s.admin(s.handleAPIList))
 	s.mux.HandleFunc("GET /api/v1/reports/{id}", s.admin(s.handleAPIGet))
 	s.mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
+	s.mux.HandleFunc("POST /api/v1/symbols", s.handleSymbolsUpload)
 	s.mux.HandleFunc("POST /api/v1/attest/challenge", s.handleAttestChallenge)
 	s.mux.HandleFunc("POST /api/v1/attest/keys", s.handleAttestKey)
 	s.mux.HandleFunc("GET /api/v1/followup/{id}", s.handleFollowUp)
@@ -182,6 +186,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /p/{slug}/keys", s.admin(s.csrf(s.project(s.handleCreateKey))))
 	s.mux.HandleFunc("POST /p/{slug}/notify/test", s.admin(s.csrf(s.project(s.handleTestNotification))))
 	s.mux.HandleFunc("POST /p/{slug}/keys/{id}/revoke", s.admin(s.csrf(s.project(s.handleRevokeKey))))
+	s.mux.HandleFunc("POST /p/{slug}/symbol-keys", s.admin(s.csrf(s.project(s.handleCreateSymbolKey))))
+	s.mux.HandleFunc("POST /p/{slug}/symbols", s.admin(s.csrf(s.project(s.handleSymbolsForm))))
+	s.mux.HandleFunc("POST /p/{slug}/symbols/{uuid}/delete", s.admin(s.csrf(s.project(s.handleDeleteSymbols))))
 	s.mux.HandleFunc("POST /p/{slug}/delete", s.admin(s.csrf(s.project(s.handleDeleteProject))))
 	s.mux.HandleFunc("GET /p/{slug}/issues/{n}", s.admin(s.project(s.handleIssue)))
 	s.mux.HandleFunc("POST /p/{slug}/issues/{n}/update", s.admin(s.csrf(s.project(s.handleUpdateIssue))))
@@ -400,6 +407,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if rec.ServerRedactions = redactor.Removed; rec.ServerRedactions > 0 {
 		s.log.Warn("server redacted text the app sent unredacted", "project", project.Slug, "count", rec.ServerRedactions)
 	}
+
+	s.symbolicateIncoming(project.Slug, rec, staged)
 
 	filed, err := s.issues.File(project.Slug, rec, project.GroupDuplicates)
 	issue, newIssue := filed.Issue, filed.Created

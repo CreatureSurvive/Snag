@@ -701,6 +701,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderSettings(w http.ResponseWriter, p *Project, newKey, flash string) {
+	s.renderSettingsPage(w, p, newKey, "", flash)
+}
+
+func (s *Server) renderSettingsKey(w http.ResponseWriter, p *Project, newKey, scope string) {
+	s.renderSettingsPage(w, p, newKey, scope, "")
+}
+
+func (s *Server) renderSettingsPage(w http.ResponseWriter, p *Project, newKey, scope, flash string) {
 	gh := p.Forwarding.GitHub
 	if gh == nil {
 		gh = &ProjectGitHub{}
@@ -710,7 +718,8 @@ func (s *Server) renderSettings(w http.ResponseWriter, p *Project, newKey, flash
 		wh = &WebhookConfig{}
 	}
 	s.render(w, "settings.html", map[string]any{
-		"P": p, "GH": gh, "WH": wh, "NewKey": newKey, "Flash": flash,
+		"P": p, "GH": gh, "WH": wh, "NewKey": newKey, "NewKeyScope": scope, "Flash": flash,
+		"Symbols":        s.symbols.List(p.Slug),
 		"HasServerToken": s.cfg.GitHubToken != "", "HasSMTP": s.cfg.SMTP != nil,
 		"Ingest": s.cfg.PublicURL, "PerHour": s.cfg.NotifyPerHour, "HasWebhook": s.cfg.GitHubWebhookSecret != "",
 	})
@@ -867,6 +876,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.Delete(rec.ID)
 	}
 	_ = s.issues.DeleteProject(p.Slug)
+	_ = s.symbols.DeleteProject(p.Slug)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
