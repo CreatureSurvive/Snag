@@ -37,6 +37,7 @@ type Server struct {
 	attestor  *Attestor
 	symbols   *SymbolStore
 	auth      *Auth
+	metrics   *Metrics
 	textIndex textCache
 	// boardSecret keys voter hashes on the ideas board.
 	boardSecret []byte
@@ -80,6 +81,7 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	s := &Server{
 		boardSecret: boardSecret,
 		auth:        auth,
+		metrics:     NewMetrics(),
 		attestor:    attestor,
 		symbols:     OpenSymbols(cfg.DataDir),
 		cfg:         cfg,
@@ -94,6 +96,13 @@ func Open(cfg Config, logger *slog.Logger) (*Server, error) {
 	s.forwarder = NewDispatcher(store, projects, cfg, s.reportURL, logger)
 	s.notifier = NewNotifier(logger, cfg.NotifyPerHour)
 	s.github = NewGitHubSync(issues, projects, cfg, logger)
+	s.forwarder.OnAttempt = func(forwarder string, err error) {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		}
+		s.metrics.Add("snag_forward_attempts_total", "Deliveries to forwarders by result.", "forwarder", forwarder, "result", result)
+	}
 	s.forwarder.OnDelivered = func(rec *Record, forwarder, url string) {
 		if forwarder == "github" {
 			s.github.Link(rec.Project, rec.Issue, url)
@@ -168,10 +177,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	s.mux.ServeHTTP(w, r)
+	sw := &statusWriter{ResponseWriter: w}
+	s.mux.ServeHTTP(sw, r)
+	if sw.status == 0 {
+		sw.status = http.StatusOK
+	}
+	s.metrics.Add("snag_http_requests_total", "HTTP requests by route group and status.", "route", routeGroup(r), "code", strconv.Itoa(sw.status))
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, map[string]any{"ok": true})
 	})
@@ -449,6 +464,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.symbolicateIncoming(project.Slug, rec, staged)
+	s.enforceQuota(project, rec, staged)
 
 	filed, err := s.issues.File(project.Slug, rec, project.GroupDuplicates)
 	issue, newIssue := filed.Issue, filed.Created
@@ -484,6 +500,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.respondExisting(w, stored)
 		return
 	}
+	s.metrics.Add("snag_reports_received_total", "Reports received by project and kind.", "project", project.Slug, "kind", stored.Kind)
 	s.log.Info("report received", "id", stored.ID, "project", project.Slug, "issue", stored.Issue, "new_issue", newIssue, "regressed", filed.Regressed, "files", len(stored.Files))
 	if len(stored.Forwarding) > 0 {
 		s.forwarder.Enqueue(stored.ID)

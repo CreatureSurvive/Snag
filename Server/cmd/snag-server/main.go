@@ -47,6 +47,7 @@ func main() {
 		}
 	}
 
+	server.Version = version
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg, err := server.LoadConfig(os.Getenv)
 	if err != nil {

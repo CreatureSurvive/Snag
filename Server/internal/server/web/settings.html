@@ -81,6 +81,10 @@
       <option value="off" {{if eq .P.Redaction "off"}}selected{{end}}>Off: trust the app's redaction</option>
     </select>
   </label>
+  <h2>Storage</h2>
+  <label>Attachment limit (MB) <input name="storageLimitMB" type="number" min="0" class="narrow" value="{{if .P.StorageLimitMB}}{{.P.StorageLimitMB}}{{end}}" placeholder="{{if .DefaultLimitMB}}{{.DefaultLimitMB}} (server default){{else}}no limit{{end}}"></label>
+  <p class="hint">Using {{bytes .Usage}}{{if .Limit}} of {{bytes .Limit}}{{end}}. Past the limit, new reports are kept without their screenshots and recordings (logs last).</p>
+
   <h2>Ideas board</h2>
   <label class="check"><input type="checkbox" name="boardEnabled" {{if .P.Board.Enabled}}checked{{end}}> Public ideas board at <a href="/b/{{.P.Slug}}">/b/{{.P.Slug}}</a>: issues you publish, with votes from visitors and the app</label>
   <label>Board title <input name="boardTitle" value="{{.P.Board.Title}}" maxlength="120" placeholder="{{.P.Name}} ideas"></label>

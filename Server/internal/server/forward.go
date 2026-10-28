@@ -123,6 +123,8 @@ type Dispatcher struct {
 	Build func(p *Project) []Forwarder
 	// OnDelivered runs after a successful forward.
 	OnDelivered func(rec *Record, forwarder, url string)
+	// OnAttempt runs after every delivery attempt.
+	OnAttempt func(forwarder string, err error)
 }
 
 func NewDispatcher(store *Store, projects *ProjectStore, cfg Config, reportURL func(string) string, logger *slog.Logger) *Dispatcher {
@@ -313,6 +315,9 @@ func (d *Dispatcher) Process(ctx context.Context, id string) {
 				s.NextAttempt = time.Now().Add(d.Backoff(s.Attempts))
 			}
 		})
+		if d.OnAttempt != nil {
+			d.OnAttempt(name, ferr)
+		}
 		if ferr == nil && d.OnDelivered != nil {
 			d.OnDelivered(rec, name, url)
 		}

@@ -67,6 +67,8 @@ type Record struct {
 	Attested bool `json:"attested,omitempty"`
 	// ServerRedactions counts secrets the server removed that the app had missed.
 	ServerRedactions int `json:"serverRedactions,omitempty"`
+	// DroppedForQuota counts attachments not kept because the project was over its storage limit.
+	DroppedForQuota int `json:"droppedForQuota,omitempty"`
 	// Symbolication is set for MetricKit crash and hang reports.
 	Symbolication *Symbolication `json:"symbolication,omitempty"`
 }
@@ -398,4 +400,17 @@ func (s *Store) PutFile(id string, file StoredFile, data []byte) error {
 	}
 	s.records[updated.ID] = updated
 	return nil
+}
+
+// Usage is the attachment bytes stored per project.
+func (s *Store) Usage() map[string]int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := map[string]int64{}
+	for _, rec := range s.records {
+		for _, f := range rec.Files {
+			out[rec.Project] += f.Size
+		}
+	}
+	return out
 }

@@ -35,6 +35,8 @@ type Project struct {
 	// WebOrigins are the sites (https://example.com) whose pages may send reports with the web
 	// SDK. "*" allows any.
 	WebOrigins []string `json:"webOrigins,omitempty"`
+	// StorageLimitMB caps this project's attachments; 0 uses SNAG_PROJECT_STORAGE_MB.
+	StorageLimitMB int `json:"storageLimitMB,omitempty"`
 	// Views are saved issue-list filters.
 	Views []SavedView `json:"views,omitempty"`
 	// Board is the public ideas board at /b/<slug>.

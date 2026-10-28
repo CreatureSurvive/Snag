@@ -23,6 +23,7 @@
       <h2>{{if eq $idx 0}}Latest report{{else}}Report{{end}} <span class="muted">· {{datetime $r.ReceivedAt}} · {{appLine $r}}</span>
         {{if $p.Attest.Mode}}{{if $r.Attested}}<span class="label fixed" title="App Attest verified">✓ verified device</span>{{else}}<span class="label" title="No valid App Attest assertion">unverified</span>{{end}}{{end}}
         {{with $r.Symbolication}}{{if .Missing}}<a class="label regress" href="/p/{{$p.Slug}}/settings#symbols" title="{{range .Missing}}{{.Binary}} {{.UUID}}&#10;{{end}}Upload the dSYM for this build to see function names.">missing symbols</a>{{else if .Resolved}}<span class="label fixed" title="{{.Resolved}} of {{.Frames}} frames resolved on the server">symbolicated</span>{{end}}{{end}}
+        {{if $r.DroppedForQuota}}<a class="label regress" href="/p/{{$p.Slug}}/settings" title="The project was over its storage limit">{{$r.DroppedForQuota}} attachment{{if gt $r.DroppedForQuota 1}}s{{end}} not kept</a>{{end}}
         {{if $r.ServerRedactions}}<span class="label regress" title="The app sent these unredacted; the server removed them. Check the app's TextRedactor rules.">server redacted {{$r.ServerRedactions}}</span>{{end}}</h2>
       <form method="post" action="/p/{{$p.Slug}}/reports/{{$r.ID}}/delete" class="danger inline">
         <input type="hidden" name="csrf" value="{{$csrf}}">

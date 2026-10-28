@@ -24,6 +24,11 @@ type Config struct {
 	TrustProxy    bool
 	RetentionDays int
 
+	// MetricsToken lets Prometheus scrape /metrics with a Bearer token instead of the admin login.
+	MetricsToken string
+	// ProjectStorageMB caps each project's attachments (0 = no limit); projects can override it.
+	ProjectStorageMB int
+
 	// InboundEmailSecret enables POST /api/v1/inbound-email for reporters' email replies.
 	InboundEmailSecret string
 
@@ -159,6 +164,12 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return cfg, err
 	}
 	if cfg.InboundEmailSecret, err = secret("SNAG_INBOUND_EMAIL_SECRET"); err != nil {
+		return cfg, err
+	}
+	if cfg.MetricsToken, err = secret("SNAG_METRICS_TOKEN"); err != nil {
+		return cfg, err
+	}
+	if cfg.ProjectStorageMB, err = intVar("SNAG_PROJECT_STORAGE_MB", 0); err != nil {
 		return cfg, err
 	}
 	cfg.BackupDir = get("SNAG_BACKUP_DIR", "")

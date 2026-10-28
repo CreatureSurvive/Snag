@@ -759,6 +759,9 @@ func (s *Server) renderSettingsPage(w http.ResponseWriter, p *Project, newKey, s
 	s.render(w, "settings.html", map[string]any{
 		"P": p, "GH": gh, "WH": wh, "NewKey": newKey, "NewKeyScope": scope, "Flash": flash,
 		"Symbols":        s.symbols.List(p.Slug),
+		"Usage":          s.store.Usage()[p.Slug],
+		"Limit":          s.storageLimit(p),
+		"DefaultLimitMB": s.cfg.ProjectStorageMB,
 		"HasServerToken": s.cfg.GitHubToken != "", "HasSMTP": s.cfg.SMTP != nil,
 		"Ingest": s.cfg.PublicURL, "PerHour": s.cfg.NotifyPerHour, "HasWebhook": s.cfg.GitHubWebhookSecret != "",
 	})
@@ -785,6 +788,15 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		p.GroupDuplicates = r.FormValue("groupDuplicates") == "on"
 		p.Board = BoardConfig{Enabled: r.FormValue("boardEnabled") == "on",
 			Title: truncate(strings.TrimSpace(r.FormValue("boardTitle")), 120), Intro: truncate(strings.TrimSpace(r.FormValue("boardIntro")), 2000)}
+		if v := strings.TrimSpace(r.FormValue("storageLimitMB")); v != "" {
+			mb, err := strconv.Atoi(v)
+			if err != nil || mb < 0 {
+				return errors.New("the storage limit must be a whole number of MB")
+			}
+			p.StorageLimitMB = mb
+		} else {
+			p.StorageLimitMB = 0
+		}
 		p.WebOrigins = nil
 		for _, o := range splitList(strings.ReplaceAll(r.FormValue("webOrigins"), "\n", ",")) {
 			if o == "*" {
