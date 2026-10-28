@@ -222,3 +222,12 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
 .or { text-align: center; color: var(--muted); margin: 16px 0; }
 p.error { color: #e03131; }
 .top .account { margin-left: auto; color: var(--muted); white-space: nowrap; }
+.top .search input { width: 200px; padding: 5px 10px; }
+.views { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.views .view { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 2px 4px 2px 10px; }
+.views .view a[aria-current] { font-weight: 600; }
+.views .view button { padding: 0 6px; }
+ul.issues > li.selected { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+dialog#shortcut-help { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 18px 22px; }
+.footnote.row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }

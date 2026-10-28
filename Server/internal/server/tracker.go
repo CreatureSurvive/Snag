@@ -663,9 +663,9 @@ type IssueFilter struct {
 	Sort   string
 	Limit  int
 	Offset int
-	// Match, when set, is consulted for Query on fields the issue doesn't store (messages,
-	// contacts, context of its reports).
-	Match func(issue *Issue, query string) bool
+	// Match, when set, decides Query (see ParseSearch); without it only titles and labels are
+	// searched.
+	Match func(issue *Issue, query SearchQuery) bool
 }
 
 func (f IssueFilter) keep(issue *Issue) bool {
@@ -702,16 +702,15 @@ func (f IssueFilter) keep(issue *Issue) bool {
 	if f.Regressed && issue.Regressions == 0 {
 		return false
 	}
-	if q := strings.ToLower(strings.TrimSpace(f.Query)); q != "" {
-		hit := strings.Contains(strings.ToLower(issue.Title), q) || strings.TrimPrefix(q, "#") == strconv.Itoa(issue.Number)
-		for _, l := range issue.Labels {
-			hit = hit || strings.Contains(l, q)
+	if q := ParseSearch(f.Query); !q.Empty() {
+		if f.Match != nil {
+			return f.Match(issue, q)
 		}
-		if !hit && f.Match != nil {
-			hit = f.Match(issue, q)
-		}
-		if !hit {
-			return false
+		text := strings.ToLower(issue.Title + " " + strings.Join(issue.Labels, " "))
+		for _, t := range q.Terms {
+			if !strings.Contains(text, t) {
+				return false
+			}
 		}
 	}
 	return true

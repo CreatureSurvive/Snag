@@ -366,18 +366,6 @@ func (s *Store) All() []*Record {
 	return out
 }
 
-// Matches reports whether any of ids matches a lowercase query (used by issue search).
-func (s *Store) Matches(ids []string, q string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, id := range ids {
-		if rec, ok := s.records[strings.ToLower(id)]; ok && rec.matches(q) {
-			return true
-		}
-	}
-	return false
-}
-
 // PutFile adds or replaces a server-generated file in a stored report. The new file comes first.
 func (s *Store) PutFile(id string, file StoredFile, data []byte) error {
 	s.mu.Lock()

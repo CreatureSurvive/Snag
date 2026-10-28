@@ -2,7 +2,7 @@
 {{$p := .P}}
 <div class="toolbar">
   <h1>{{.P.Name}} <span class="count">{{.Stats.Open}} open</span></h1>
-  <span class="row"><a class="small" href="/p/{{.P.Slug}}/releases">Releases</a><a class="small" href="/p/{{.P.Slug}}/settings">Settings</a></span>
+  <span class="row"><a class="small" href="/p/{{.P.Slug}}/issues.csv?{{.ViewQuery}}" download>Export CSV</a><a class="small" href="/p/{{.P.Slug}}/releases">Releases</a><a class="small" href="/p/{{.P.Slug}}/settings">Settings</a></span>
 </div>
 
 <nav class="tabs">
@@ -12,10 +12,15 @@
   <a href="{{if .Regressed}}{{query .Q "regressed" ""}}{{else}}{{query .Q "regressed" "1"}}{{end}}" {{if .Regressed}}aria-current="page"{{end}}>↺ Regressions</a>
 </nav>
 
+{{if .P.Views}}
+<nav class="views" aria-label="Saved views">
+  {{range .P.Views}}<span class="view"><a href="/p/{{$p.Slug}}?{{.Query}}" {{if eq .Query $.ViewQuery}}aria-current="page"{{end}}>{{.Name}}</a><form method="post" action="/p/{{$p.Slug}}/views/{{.ID}}/delete" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="ghost" aria-label="Delete view {{.Name}}" title="Delete view">×</button></form></span>{{end}}
+</nav>
+{{end}}
 <form class="filters" method="get" action="/p/{{.P.Slug}}">
   <input type="hidden" name="status" value="{{.Status}}">
   {{if .Regressed}}<input type="hidden" name="regressed" value="1">{{end}}
-  <input type="search" name="q" value="{{.Query}}" placeholder="Search titles, messages, contacts, #12…" aria-label="Search">
+  <input type="search" name="q" value="{{.Query}}" placeholder="Search issues and reports (in:logs for logs too)" aria-label="Search" data-shortcut="/">
   <select name="priority" aria-label="Priority">
     <option value="">Any priority</option>
     {{range priorities}}<option value="{{.}}" {{if eq . $.Priority}}selected{{end}}>{{.}}</option>{{end}}
@@ -89,5 +94,12 @@
   {{else}}<p><strong>Nothing open.</strong></p><p>New reports for {{.P.Name}} land here.</p>{{end}}
 </div>
 {{end}}
-<p class="footnote">{{.Total}} matching</p>
+<div class="footnote row">
+  <span>{{.Total}} matching</span>
+  <form method="post" action="/p/{{.P.Slug}}/views" class="inline row">
+    <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="query" value="{{.ViewQuery}}">
+    <input name="name" placeholder="Name this view" aria-label="View name" maxlength="40" class="narrow">
+    <button type="submit" class="ghost">Save view</button>
+  </form>
+</div>
 {{template "foot"}}

@@ -37,6 +37,7 @@ type Server struct {
 	attestor  *Attestor
 	symbols   *SymbolStore
 	auth      *Auth
+	textIndex textCache
 	// boardSecret keys voter hashes on the ideas board.
 	boardSecret []byte
 	log         *slog.Logger
@@ -212,6 +213,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.admin(s.csrf(s.handleCreateProject)))
 	s.mux.HandleFunc("GET /p/{slug}", s.admin(s.project(s.handleIssues)))
 	s.mux.HandleFunc("POST /p/{slug}/bulk", s.admin(s.csrf(s.project(s.handleBulk))))
+	s.mux.HandleFunc("GET /p/{slug}/issues.csv", s.admin(s.project(s.handleIssuesCSV)))
+	s.mux.HandleFunc("POST /p/{slug}/views", s.admin(s.csrf(s.project(s.handleSaveView))))
+	s.mux.HandleFunc("POST /p/{slug}/views/{id}/delete", s.admin(s.csrf(s.project(s.handleDeleteView))))
+	s.mux.HandleFunc("GET /search", s.admin(s.handleSearch))
 	s.mux.HandleFunc("GET /p/{slug}/releases", s.admin(s.project(s.handleReleases)))
 	s.mux.HandleFunc("GET /p/{slug}/settings", s.admin(s.project(s.handleSettings)))
 	s.mux.HandleFunc("POST /p/{slug}/settings", s.admin(s.csrf(s.project(s.handleSaveSettings))))

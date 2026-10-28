@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex">
 <title>{{.Title}} · Snag</title>
 <link rel="stylesheet" href="/static/style.css?v={{cssVersion}}">
+<script src="/static/shortcuts.js?v={{cssVersion}}" defer></script>
 </head>
 <body>
 <header class="top">
@@ -14,6 +15,7 @@
     {{range .Data.AllProjects}}<a href="/p/{{.Slug}}" {{if and $.Data.P (eq .Slug $.Data.P.Slug)}}aria-current="page"{{end}}>{{.Name}}</a>{{end}}
     <a class="add" href="/projects/new" title="New project">+</a>
   </nav>
+  <form class="search" method="get" action="/search" role="search"><input type="search" name="q" placeholder="Search all projects" aria-label="Search all projects"></form>
   <a class="account" href="/account">Account</a>
 </header>
 <main>

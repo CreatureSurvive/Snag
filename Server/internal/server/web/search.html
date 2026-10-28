@@ -1,0 +1,27 @@
+{{template "head" (dict "Title" "Search" "Data" .)}}
+<h1>Search</h1>
+<form class="filters" method="get" action="/search">
+  <input type="search" name="q" value="{{.Query}}" placeholder="Words, &quot;a phrase&quot;, #12, in:logs" aria-label="Search" autofocus data-shortcut="/">
+  <label class="check"><input type="checkbox" name="open" value="1" {{if .Open}}checked{{end}}> Open only</label>
+  <button type="submit">Search</button>
+</form>
+{{if .Query}}
+  {{if .Groups}}
+  {{range .Groups}}{{$p := .P}}
+  <section>
+    <h2><a href="/p/{{.P.Slug}}?status=all&amp;q={{$.Query}}">{{.P.Name}}</a> <span class="count">{{.Total}}</span></h2>
+    <ul class="issues">
+      {{range .Issues}}
+      <li><a href="/p/{{$p.Slug}}/issues/{{.Number}}">
+        <span class="num">#{{.Number}}</span>
+        <span class="main"><span class="title">{{.Title}}</span>
+          <span class="tags">{{template "kind" .Kind}}{{template "status" .Status}}{{template "priority" .Priority}}</span></span>
+        <span class="meta"><span>{{ago .LastReportAt}}</span></span>
+      </a></li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+  {{else}}<div class="empty"><p>Nothing matches “{{.Query}}”.</p>{{if not (contains .Query "in:logs")}}<p class="muted">Add <code>in:logs</code> to search logs and crash reports too.</p>{{end}}</div>{{end}}
+{{end}}
+{{template "foot"}}

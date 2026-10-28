@@ -35,6 +35,7 @@ var cssVersion = func() string {
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	"cssVersion": func() string { return cssVersion },
+	"contains":   strings.Contains,
 	"ago": func(t time.Time) string {
 		if t.IsZero() {
 			return "never"
@@ -218,7 +219,7 @@ func (s *Server) issueFilter(r *http.Request, limit int) IssueFilter {
 		Status: status, Priority: q.Get("priority"), Label: q.Get("label"), Kind: q.Get("kind"),
 		Version: q.Get("version"), Query: q.Get("q"), Sort: q.Get("sort"), Regressed: q.Get("regressed") != "",
 		Limit: limit, Offset: (page - 1) * limit,
-		Match: func(issue *Issue, query string) bool { return s.store.Matches(issue.Reports, query) },
+		Match: s.matchIssue,
 	}
 }
 
@@ -249,7 +250,7 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		"Status": status, "Priority": q.Get("priority"), "Label": q.Get("label"), "Kind": q.Get("kind"),
 		"Version": q.Get("version"), "Query": q.Get("q"), "Sort": q.Get("sort"), "Q": q, "Regressed": q.Get("regressed") != "",
 		"Labels": labels, "Kinds": kinds, "Versions": versions, "Next": next,
-		"Return": r.URL.RequestURI(),
+		"Return": r.URL.RequestURI(), "ViewQuery": viewQuery(r.URL.RawQuery),
 	})
 }
 
