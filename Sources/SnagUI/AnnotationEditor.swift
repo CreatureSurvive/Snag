@@ -53,6 +53,10 @@ public struct AnnotationEditor: View {
         .navigationTitle(localized("Mark Up"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        // The bar sits over the dark canvas: keep its title readable in light mode.
+        .toolbarBackground(Color.black.opacity(0.92), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         #endif
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

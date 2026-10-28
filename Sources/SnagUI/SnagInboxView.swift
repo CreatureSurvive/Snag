@@ -168,6 +168,9 @@ struct SnagReportThreadView: View {
                     .padding()
                 }
             }
+            #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
+            #endif
             .onChange(of: entry?.messages.count) { _, _ in
                 if let last = entry?.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 Task { await model.inbox.markRead(id) }

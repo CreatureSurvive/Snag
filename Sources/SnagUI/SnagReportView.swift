@@ -77,6 +77,7 @@ public struct SnagReportView: View {
             }
             .navigationTitle(options.navigationTitle)
             #if os(iOS)
+            .scrollDismissesKeyboard(.immediately)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar { toolbar }
