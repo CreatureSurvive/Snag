@@ -9,6 +9,9 @@ public struct SnagConfiguration: Sendable {
     public var context: ContextOptions
     /// Log text attached to every report. The user can turn logs off in the form.
     public var logSources: [any LogSource]
+    /// Recent activity attached as `breadcrumbs.json` (with the logs, under the same toggle).
+    /// `nil` attaches none.
+    public var breadcrumbs: Breadcrumbs?
     /// Extra key/value pairs added to every report's context, evaluated when a report is made.
     public var customContext: @Sendable @MainActor () -> [String: String]
     public var retryPolicy: RetryPolicy
@@ -22,6 +25,7 @@ public struct SnagConfiguration: Sendable {
         textRedactor: TextRedactor = .standard,
         context: ContextOptions = .all,
         logSources: [any LogSource] = [SnagLog.shared],
+        breadcrumbs: Breadcrumbs? = .shared,
         customContext: @escaping @Sendable @MainActor () -> [String: String] = { [:] },
         retryPolicy: RetryPolicy = .default,
         maximumAttachmentBytes: Int = 20_000_000,
@@ -31,6 +35,7 @@ public struct SnagConfiguration: Sendable {
         self.textRedactor = textRedactor
         self.context = context
         self.logSources = logSources
+        self.breadcrumbs = breadcrumbs
         self.customContext = customContext
         self.retryPolicy = retryPolicy
         self.maximumAttachmentBytes = maximumAttachmentBytes
@@ -84,9 +89,11 @@ public final class Snag: Sendable {
         await ContextCollector.collect(configuration.context, custom: configuration.customContext())
     }
 
-    /// Runs every log source and returns one attachment per source that produced text.
+    /// Runs every log source and returns one attachment per source that produced text, then the
+    /// breadcrumbs.
     public func collectLogs() async -> [Attachment] {
-        await withTaskGroup(of: (Int, Attachment?).self) { group in
+        let crumbs = configuration.breadcrumbs?.attachment()
+        let logs = await withTaskGroup(of: (Int, Attachment?).self) { group in
             for (index, source) in configuration.logSources.enumerated() {
                 group.addTask {
                     guard let text = await source.collect(), !text.isEmpty else { return (index, nil) }
@@ -97,6 +104,7 @@ public final class Snag: Sendable {
             for await case let (index, attachment?) in group { results.append((index, attachment)) }
             return results.sorted { $0.0 < $1.0 }.map(\.1)
         }
+        return logs + (crumbs.map { [$0] } ?? [])
     }
 
     /// Redacts, trims to the size limit, and queues the report. Returns once it's saved on disk;

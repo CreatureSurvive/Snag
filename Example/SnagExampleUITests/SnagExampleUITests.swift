@@ -78,8 +78,15 @@ final class SnagExampleUITests: XCTestCase {
             let text = String(decoding: try admin("reports/\(id)/files/\(log["name"] as! String)"), as: UTF8.self)
             XCTAssertFalse(text.contains("abcdefghijklmnop123456"), "tokens in logs are redacted")
         }
-        let breadcrumbs = try logs.map { String(decoding: try admin("reports/\(id)/files/\($0["name"] as! String)"), as: UTF8.self) }.joined()
-        XCTAssertTrue(breadcrumbs.contains("Tapped Report a Problem") || breadcrumbs.contains("Account screen appeared"))
+        let allLogs = try logs.map { String(decoding: try admin("reports/\(id)/files/\($0["name"] as! String)"), as: UTF8.self) }.joined()
+        XCTAssertTrue(allLogs.contains("Tapped Report a Problem") || allLogs.contains("Account screen appeared"))
+
+        // The activity trail: the screen and the observed request, reduced to its shape.
+        let crumbsFile = try XCTUnwrap(logs.first { $0["filename"] as? String == "breadcrumbs.json" }, "breadcrumbs attached")
+        let crumbs = try XCTUnwrap(JSONSerialization.jsonObject(with: admin("reports/\(id)/files/\(crumbsFile["name"] as! String)")) as? [[String: Any]])
+        let messages = crumbs.compactMap { $0["message"] as? String }
+        XCTAssertTrue(messages.contains("Account"), "\(messages)")
+        XCTAssertTrue(messages.contains { $0.hasPrefix("GET localhost:8787/api/v1/health?probe → 200") }, "\(messages)")
 
         let shotInfo = try XCTUnwrap(files.first { $0["role"] as? String == "screenshot" })
         XCTAssertEqual(shotInfo["contentType"] as? String, "image/png")

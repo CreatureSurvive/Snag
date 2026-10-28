@@ -329,14 +329,16 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		reports[i], reports[j] = reports[j], reports[i]
 	}
 	type view struct {
-		R     *Record
-		Texts []map[string]any
+		R      *Record
+		Texts  []map[string]any
+		Crumbs []BreadcrumbRow
 	}
 	views := make([]view, 0, len(reports))
 	for i, rec := range reports {
 		v := view{R: rec}
 		if i == 0 { // logs only for the newest, to keep the page light
 			v.Texts = s.texts(rec)
+			v.Crumbs = s.breadcrumbs(rec)
 		}
 		views = append(views, v)
 	}
@@ -364,8 +366,8 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 func (s *Server) texts(rec *Record) []map[string]any {
 	var out []map[string]any
 	for _, f := range rec.Files {
-		if !f.IsText() {
-			continue
+		if !f.IsText() || f.Filename == breadcrumbsFilename {
+			continue // breadcrumbs get their own timeline
 		}
 		path, _, err := s.store.FilePath(rec.ID, f.Name)
 		if err != nil {

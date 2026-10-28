@@ -41,6 +41,7 @@ struct ContentView: View {
                     if let snag = Snag.shared {
                         NavigationLink {
                             SnagInboxView(snag: snag)
+                                .snagScreen("My Reports")
                         } label: {
                             Label("My Reports", systemImage: "tray")
                         }
@@ -48,6 +49,7 @@ struct ContentView: View {
                     }
                     Button {
                         SnagLog.shared.log("Tapped Report a Problem")
+                        Breadcrumbs.shared.action("Tapped Report a Problem")
                         logger.info("Opening the report form")
                         report()
                     } label: {
@@ -69,6 +71,12 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Snag Example")
+            .snagScreen("Account")
+            .task {
+                // A request through the observer shows up in the report's activity timeline.
+                let url = URL(string: (ProcessInfo.processInfo.environment["SNAG_SERVER_URL"] ?? "http://localhost:8787") + "/api/v1/health?probe=1")!
+                _ = try? await URLSession.shared.data(from: url, delegate: SnagNetworkObserver.shared)
+            }
             .onAppear {
                 SnagLog.shared.log("Account screen appeared")
                 logger.notice("Account screen appeared, token=Bearer abcdefghijklmnop123456")

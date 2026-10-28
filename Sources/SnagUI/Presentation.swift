@@ -55,6 +55,7 @@ struct SnagReportingModifier: ViewModifier {
     /// Runs after the form finishes dismissing (to capture without the sheet in the way).
     @State private var afterDismiss: (() -> Void)?
     @State private var askingAboutScreenshot = false
+    @Environment(\.scenePhase) private var scenePhase
     #if canImport(UIKit)
     @State private var window: UIWindow?
     #endif
@@ -66,6 +67,14 @@ struct SnagReportingModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.snagReport, SnagReportAction { includeScreenshot in present(includeScreenshot: includeScreenshot) })
+            .onChange(of: scenePhase) { _, phase in
+                let crumbs = (snag ?? Snag.shared)?.configuration.breadcrumbs
+                switch phase {
+                case .active: crumbs?.record(Breadcrumb(.lifecycle, "App became active"))
+                case .background: crumbs?.record(Breadcrumb(.lifecycle, "App moved to the background"))
+                default: break
+                }
+            }
             #if canImport(UIKit)
             .background(WindowReader(window: $window))
             #endif
