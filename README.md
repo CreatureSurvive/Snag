@@ -426,6 +426,9 @@ Scripts/live-test.sh          # Swift client against the real Docker image
 Scripts/ui-test.sh            # Example app UI tests against a local server (iOS or tvOS)
 ```
 
+To run the example app on a device, set your Team ID when generating the project:
+`SNAG_DEVELOPMENT_TEAM=ABCDE12345 xcodegen generate` in `Example/` (simulators don't need it).
+
 The UI tests send reports from the example app to a real server. They check that private areas
 are black in the uploaded screenshot's pixels and in a frame decoded from the uploaded recording,
 that a developer reply shows up in My Reports and the user's answer reaches the server, and that
