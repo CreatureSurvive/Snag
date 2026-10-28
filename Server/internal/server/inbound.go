@@ -202,7 +202,7 @@ func parseInbound(r *http.Request) (*InboundEmail, error) {
 		// Postmark
 		var pm struct {
 			From, To, Cc, Subject, TextBody, StrippedTextReply, OriginalRecipient, MessageID string
-			Headers                                                                        []struct{ Name, Value string }
+			Headers                                                                          []struct{ Name, Value string }
 		}
 		if err := json.NewDecoder(r.Body).Decode(&pm); err != nil {
 			return nil, fmt.Errorf("JSON: %w", err)
@@ -303,7 +303,6 @@ func parseRFC822(r io.Reader) (*InboundEmail, error) {
 }
 
 type headerGetter interface{ Get(string) string }
-
 
 // plainText finds the text/plain body of a message, descending into multipart parts.
 func plainText(h headerGetter, body io.Reader, depth int) (string, error) {

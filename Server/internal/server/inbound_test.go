@@ -101,11 +101,11 @@ func TestEmailRepliesJoinTheConversation(t *testing.T) {
 
 func TestStripQuotedReply(t *testing.T) {
 	cases := map[string]string{
-		"Thanks!\n\nOn Tue, Oct 27, 2026 at 10:00 AM Dev <d@x.com> wrote:\n> hi":      "Thanks!",
-		"Danke\n\nAm 27.10.2026 um 10:00 schrieb Dev <d@x.com>:\n> hi":                  "Danke",
-		"ok\n-----Original Message-----\nFrom: d":                                       "ok",
-		"line one\n> quoted\nline two\n-- \nSent from my phone":                         "line one\nline two",
-		"Merci\n\nLe mar. 27 oct. 2026 à 10:00, Dev <d@x.com> a écrit :\n> salut":       "Merci",
+		"Thanks!\n\nOn Tue, Oct 27, 2026 at 10:00 AM Dev <d@x.com> wrote:\n> hi":  "Thanks!",
+		"Danke\n\nAm 27.10.2026 um 10:00 schrieb Dev <d@x.com>:\n> hi":            "Danke",
+		"ok\n-----Original Message-----\nFrom: d":                                 "ok",
+		"line one\n> quoted\nline two\n-- \nSent from my phone":                   "line one\nline two",
+		"Merci\n\nLe mar. 27 oct. 2026 à 10:00, Dev <d@x.com> a écrit :\n> salut": "Merci",
 	}
 	for in, want := range cases {
 		if got := stripQuotedReply(in); got != want {
