@@ -735,6 +735,10 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 			p.Name = truncate(name, 80)
 		}
 		p.GroupDuplicates = r.FormValue("groupDuplicates") == "on"
+		switch level := r.FormValue("redaction"); level {
+		case RedactStandard, RedactStrict, RedactOff:
+			p.Redaction = level
+		}
 		f := &p.Forwarding
 		if repo := strings.TrimSpace(r.FormValue("githubRepo")); repo != "" {
 			if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {

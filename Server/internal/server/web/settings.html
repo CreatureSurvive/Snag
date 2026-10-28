@@ -35,6 +35,15 @@
   <label>Name <input name="name" value="{{.P.Name}}" maxlength="80"></label>
   <label class="check"><input type="checkbox" name="groupDuplicates" {{if .P.GroupDuplicates}}checked{{end}}> Group identical reports (same title and message) into their issue, and reopen a resolved issue as a regression when it's reported again on its fixed-in version or later</label>
 
+  <label>Server-side redaction
+    <select name="redaction">
+      <option value="" {{if eq .P.Redaction ""}}selected{{end}}>Standard: tokens, keys, card numbers, URL credentials</option>
+      <option value="strict" {{if eq .P.Redaction "strict"}}selected{{end}}>Strict: standard plus emails, phone numbers and IP addresses</option>
+      <option value="off" {{if eq .P.Redaction "off"}}selected{{end}}>Off: trust the app's redaction</option>
+    </select>
+  </label>
+  <p class="hint">The app redacts before sending. The server runs the same rules again on titles, messages, custom context and text attachments, so older or custom clients can't store secrets. The contact field is kept.</p>
+
   <h2>Forward new issues</h2>
   <p class="hint">Each new issue is sent once to every destination below. For secret fields, leave blank to keep the current value or enter <code>-</code> to remove it.</p>
   <fieldset>

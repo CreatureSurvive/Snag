@@ -30,6 +30,8 @@ type Project struct {
 	// GroupDuplicates files a report with identical title and message (and the same app
 	// version) under the existing open issue instead of opening a new one.
 	GroupDuplicates bool `json:"groupDuplicates"`
+	// Redaction is the server-side scrub level: "" (standard), "strict" or "off".
+	Redaction string `json:"redaction,omitempty"`
 	// FromConfig marks projects seeded from SNAG_API_KEYS or the projects file.
 	FromConfig bool `json:"fromConfig,omitempty"`
 
@@ -119,6 +121,7 @@ type ProjectSeed struct {
 	Notify          *NotifyConfig     `json:"notify,omitempty"`
 	Attest          *AttestConfig     `json:"attest,omitempty"`
 	GroupDuplicates *bool             `json:"groupDuplicates,omitempty"`
+	Redaction       string            `json:"redaction,omitempty"`
 }
 
 var ErrProjectExists = errors.New("a project with that slug already exists")
@@ -157,6 +160,7 @@ func OpenProjects(dataDir string, seeds []ProjectSeed) (*ProjectStore, error) {
 			if seed.GroupDuplicates != nil {
 				p.GroupDuplicates = *seed.GroupDuplicates
 			}
+			p.Redaction = seed.Redaction
 			if seed.Notify != nil {
 				p.Notify = *seed.Notify
 			}

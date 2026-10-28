@@ -389,6 +389,16 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		rec.Files = append(rec.Files, file)
 	}
 
+	redactor := NewRedactor(project.Redaction)
+	if err := redactor.Record(rec, staged); err != nil {
+		s.log.Error("redacting upload", "err", err)
+		fail(w, http.StatusInternalServerError, "couldn't save the report")
+		return
+	}
+	if rec.ServerRedactions = redactor.Removed; rec.ServerRedactions > 0 {
+		s.log.Warn("server redacted text the app sent unredacted", "project", project.Slug, "count", rec.ServerRedactions)
+	}
+
 	filed, err := s.issues.File(project.Slug, rec, project.GroupDuplicates)
 	issue, newIssue := filed.Issue, filed.Created
 	if err != nil {

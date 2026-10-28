@@ -65,6 +65,8 @@ type Record struct {
 	ReaderTokenHash string `json:"readerTokenHash,omitempty"`
 	// Attested is true when the upload carried a valid App Attest assertion.
 	Attested bool `json:"attested,omitempty"`
+	// ServerRedactions counts secrets the server removed that the app had missed.
+	ServerRedactions int `json:"serverRedactions,omitempty"`
 }
 
 type StoredFile struct {
