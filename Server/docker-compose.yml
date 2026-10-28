@@ -40,6 +40,21 @@ services:
       SNAG_SMTP_PASSWORD: ${SNAG_SMTP_PASSWORD:-}
       SNAG_SMTP_FROM: ${SNAG_SMTP_FROM:-}
       SNAG_SMTP_TO: ${SNAG_SMTP_TO:-}
+      # Reporters' email replies (see README: Email replies)
+      SNAG_INBOUND_EMAIL_SECRET: ${SNAG_INBOUND_EMAIL_SECRET:-}
+      # Scheduled backups into the backups volume
+      SNAG_BACKUP_DIR: ${SNAG_BACKUP_DIR:-}
+      SNAG_BACKUP_KEEP: ${SNAG_BACKUP_KEEP:-7}
+      # Storage: a per-project attachment limit, and optional S3-compatible storage for media
+      SNAG_PROJECT_STORAGE_MB: ${SNAG_PROJECT_STORAGE_MB:-0}
+      SNAG_S3_BUCKET: ${SNAG_S3_BUCKET:-}
+      SNAG_S3_ENDPOINT: ${SNAG_S3_ENDPOINT:-}
+      SNAG_S3_REGION: ${SNAG_S3_REGION:-}
+      SNAG_S3_ACCESS_KEY_ID: ${SNAG_S3_ACCESS_KEY_ID:-}
+      SNAG_S3_SECRET_ACCESS_KEY: ${SNAG_S3_SECRET_ACCESS_KEY:-}
+      SNAG_S3_PREFIX: ${SNAG_S3_PREFIX:-}
+      # Prometheus scraping of /metrics
+      SNAG_METRICS_TOKEN: ${SNAG_METRICS_TOKEN:-}
 
 volumes:
   snag-data:

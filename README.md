@@ -5,7 +5,8 @@
 [![Platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20macOS%20%7C%20tvOS%20%7C%20visionOS-blue)](#requirements)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-In-app bug reporting for Apple platforms, plus a self-hosted issue tracker to receive the reports.
+In-app bug reporting for Apple platforms and the web, plus a self-hosted issue tracker to receive
+the reports.
 
 - **Privacy first.** Screenshots and recordings are redacted while they're rendered: views marked
   `.snagPrivate()` and password fields are solid black in the pixels themselves, before anything
@@ -14,9 +15,10 @@ In-app bug reporting for Apple platforms, plus a self-hosted issue tracker to re
   destination, and survive crashes, relaunches and days offline.
 - **Send anywhere.** Your own Snag server, GitHub Issues, Discord, Slack, a signed webhook, or
   email, at the same time.
-- **A real tracker on the other end.** One small Docker image (about 10 MB, Go, no dependencies)
-  with projects, issue workflow, duplicate grouping, regressions, releases, notifications, two-way
-  GitHub sync, replies the user sees in your app, and App Attest to reject forged reports.
+- **A real tracker on the other end.** One small Docker image (about 12 MB, Go, no dependencies)
+  with projects, issue workflow, duplicate grouping, regressions, releases, crash symbolication,
+  notifications, two-way GitHub sync, conversations with reporters in the app and by email, a
+  public ideas board with votes, and App Attest to reject forged reports.
 
 ```swift
 import Snag
@@ -41,8 +43,9 @@ form with a redacted screenshot, markup tools, logs and a preview of exactly wha
 
 ## Contents
 
-- [The app side](#the-app-side): reporting UI, redaction, capture and recording, logs, sinks, the outbox, My Reports, crash reports, App Attest
-- [The server](#the-server): running it, projects, the tracker, forwarding, notifications, GitHub sync, API
+- [The app side](#the-app-side): reporting UI, redaction, capture and recording, logs and breadcrumbs, sinks, the outbox, My Reports, ideas, crash reports, App Attest, languages
+- [The web](#the-web): the browser SDK
+- [The server](#the-server): running it, projects, the tracker, symbols, email replies, the ideas board, forwarding, notifications, GitHub sync, sign-in, backups, storage, metrics, API
 - [Testing](#testing), [Requirements](#requirements), [Limitations](#limitations)
 
 ## The app side
@@ -111,9 +114,24 @@ Each report includes the app version and build, device model, OS, locale, displa
 settings, power, network and storage (choose with `ContextOptions`), plus your own key/value pairs.
 Nothing identifying is collected: no device name, vendor ID or IP address.
 
-Log sources: `SnagLog.shared.log("…")` (an in-memory ring buffer for breadcrumbs), `OSLogSource`
-(this process's unified log, no entitlement needed), or `CustomLogSource` for logs you already
-keep. The user can turn logs off, and "What's included" shows the exact text that will be sent.
+Log sources: `SnagLog.shared.log("…")` (an in-memory ring buffer), `OSLogSource` (this process's
+unified log, no entitlement needed), or `CustomLogSource` for logs you already keep. The user can
+turn logs off, and "What's included" shows the exact text that will be sent.
+
+### Breadcrumbs
+
+Reports also carry the last 100 steps before the report, shown on the dashboard as a timeline:
+
+```swift
+PlayerView().snagScreen("Player")                       // screens (SwiftUI)
+Breadcrumbs.shared.trackViewControllers()               // screens (UIKit, by class name)
+Breadcrumbs.shared.action("Tapped Play")                // your own events
+try await URLSession.shared.data(for: request, delegate: SnagNetworkObserver.shared)  // requests
+```
+
+App foreground and background changes are recorded by `.snagReporting`. Requests keep only the
+method, host, path (IDs collapsed to `:id`), query parameter names, status and duration: never
+headers, bodies or query values. Breadcrumbs go through the `TextRedactor` like everything else.
 
 ### Sinks
 
@@ -148,6 +166,16 @@ on", "Fixed in 3.3") and the messages you send from the dashboard; the user can 
 Each report has its own secret, so the app can only read its own reports. `SnagInboxModel`
 exposes `unreadCount` for a badge.
 
+### Ideas
+
+```swift
+NavigationLink("Ideas") { SnagIdeasView(board: SnagBoard(server: sink)) { report() } }
+```
+
+Lists the ideas you publish on the project's [ideas board](#the-ideas-board) with their status
+and votes; the user can vote, and "Suggest an Idea" opens your form. `SnagBoard` is the client
+underneath if you'd rather build your own UI. Votes are tied to a random ID per install.
+
 ### Crash and hang reports
 
 ```swift
@@ -164,12 +192,50 @@ frame, a symbolicated log and the raw JSON, under the version that crashed. Iden
 the same title and message, so the server groups them into one issue. MetricKit delivers on a
 later launch, only on devices, and not on tvOS.
 
+Release builds are stripped, so the device can only name system frames. Upload your dSYMs and the
+server [symbolicates](#crash-symbols) the app's frames: function names and source lines, in the
+issue title too, so the same crash groups across builds.
+
 ### App Attest
 
 `SnagServerSink(…, appAttest: .whenSupported)` attests a Secure Enclave key with your server once,
 then signs every upload. With the project set to require verified devices, reports from scripts,
 emulators or a stolen key are rejected. The simulator can't attest; reports from it are sent
 without a signature, so use "verify and mark" while developing.
+
+### Languages and accessibility
+
+SnagUI and SnagPostmortem ship in English, German, Spanish, French, Japanese, Brazilian Portuguese
+and Simplified Chinese. Snag follows your app's languages, so list the ones you support
+(`CFBundleLocalizations`, or your own localizations); an English-only app shows Snag in English.
+The translations were machine-made and are marked for review in the string catalogs; corrections
+are welcome.
+
+The form supports VoiceOver labels, Dynamic Type up to the largest accessibility sizes and Reduce
+Motion, and the example app's UI tests run Xcode's accessibility audit on it.
+
+## The web
+
+The server hosts a dependency-free browser SDK:
+
+```html
+<script src="https://snag.example.com/sdk/snag.js"></script>
+<script>
+  Snag.init({ url: "https://snag.example.com", apiKey: "snag_…", app: { name: "My Site", version: "2.1" } })
+</script>
+```
+
+A Feedback button opens a form (bug, feedback or idea, summary, email). Reports include console
+messages, uncaught errors and a breadcrumb trail of pages, clicks and `fetch`/XHR requests, all
+redacted with the same rules as the app (`redaction: "strict"` adds emails, phone numbers and
+IPs). The user can add a screenshot of the current tab: password and card fields and anything
+with `data-snag-private` are blacked out, and sharing a window or screen instead is refused because
+its private areas can't be located. Reports made offline wait in `localStorage`.
+
+`Snag.report({ … })` sends without the form, `Snag.breadcrumb(kind, message)` and
+`Snag.setContext(key, value)` add context, and `text: { … }` replaces any label. Add the site
+under **Web origins** in the project's settings; use a separate ingest key, since it's visible in
+the page.
 
 ## The server
 
@@ -196,6 +262,11 @@ the `/data` volume as plain JSON files plus attachments, so it's easy to back up
 | `SNAG_GITHUB_TOKEN`, `SNAG_GITHUB_WEBHOOK_SECRET` | Default GitHub token; secret for the sync webhook. |
 | `SNAG_SMTP_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, `_FROM`, `_REPLY_TO` | Email forwarding and replies to reporters. |
 | `SNAG_NTFY_URL`, `SNAG_PUSHOVER_USER`, `SNAG_PUSHOVER_TOKEN`, `SNAG_NOTIFY_PER_HOUR` | Notification defaults. |
+| `SNAG_INBOUND_EMAIL_SECRET` | Turns on [email replies from reporters](#email-replies). |
+| `SNAG_BACKUP_DIR`, `SNAG_BACKUP_HOURS`, `SNAG_BACKUP_KEEP` | Scheduled [backups](#backups): where, how often (24), how many to keep (7). |
+| `SNAG_PROJECT_STORAGE_MB` | Default attachment limit per project (0 = none). |
+| `SNAG_S3_BUCKET`, `_ENDPOINT`, `_REGION`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_PREFIX` | [S3-compatible storage](#storage) for screenshots and recordings. |
+| `SNAG_METRICS_TOKEN` | Bearer token for Prometheus to scrape `/metrics`. |
 
 Every secret can also be read from a file: `SNAG_GITHUB_TOKEN_FILE=/run/secrets/github`.
 
@@ -218,7 +289,12 @@ edits in the dashboard win.
 ### The tracker
 
 - **Issues group reports.** Statuses New, Triaged, In progress, Resolved and Won't fix, plus
-  priority, labels and bulk actions. Search covers report text and device details.
+  priority, labels and bulk actions.
+- **Search.** Every word or `"quoted phrase"` must match the issue, its notes and conversation,
+  or its reports' text, contacts, versions and devices; `in:logs` searches logs and crash logs
+  too. Search one project or all of them from the header. Save filters as views, and export any
+  list as CSV.
+- **Keyboard.** `/` search, `j`/`k` move, `o` open, `x` select, `g h` home, `?` for the rest.
 - **Duplicates.** Each issue suggests similar ones to merge, and identical reports can be grouped
   automatically. Merged issues redirect.
 - **Releases and regressions.** Mark the version a fix ships in. A resolved issue reported again
@@ -226,6 +302,40 @@ edits in the dashboard win.
   Releases page shows reports per day and what was new and fixed in each version.
 - **Notes and activity.** Internal notes, and a history of every change.
 - **Replies.** Message one reporter or all of them in the app's My Reports, or reply by email.
+  Both land in one conversation per report.
+- **Server-side redaction.** The server runs the redaction rules again on everything it receives
+  (standard, strict or off per project) and flags reports where the app missed something.
+
+### Crash symbols
+
+Upload dSYMs from CI or an Xcode build phase with a symbol upload token (created under
+**Crash symbols** in the project's settings; it can't send reports):
+
+```bash
+SNAG_URL=https://snag.example.com SNAG_SYMBOLS_TOKEN=snag_… Scripts/upload-symbols.sh build/MyApp.xcarchive
+```
+
+The server reads the DWARF line tables itself (no Xcode needed) and adds a symbolicated log to
+crash and hang reports: function names, inlined calls, files and lines for your binaries. Reports
+that arrived before their symbols are symbolicated when the symbols are uploaded, and issues show
+which builds are missing them.
+
+### Email replies
+
+With SMTP set up, replies from the dashboard go out with a per-report address
+(`support+r…@example.com`, from `SNAG_SMTP_REPLY_TO`). Point that mailbox at
+`<public URL>/api/v1/inbound-email?key=<SNAG_INBOUND_EMAIL_SECRET>` and the reporter's answer joins
+the issue's conversation, with quoted text and signatures removed. It accepts raw messages
+(Cloudflare Email Workers), Mailgun and SendGrid form posts, and Postmark's JSON. The tag is signed,
+so it can't be forged, and a reply without it is only accepted from the reporter's own address.
+
+### The ideas board
+
+Turn on the board in a project's settings and publish issues to `<public URL>/b/<slug>`: a public
+page listing each idea's title, status ("Planned", "In progress", "Done in 3.3") and the
+description you write. Reporters' messages and contacts are never shown. Visitors vote once per
+browser, apps vote through `SnagBoard`, and reports asking for the same thing count too. Sort the
+issue list by votes to see what people want most.
 
 ### Forwarding
 
@@ -247,6 +357,44 @@ reopens, label changes and comments come back, the comments as notes. With
 `<public URL>/api/v1/github/webhook` for instant updates. Snag also polls, every 10 minutes
 without a webhook or hourly with one.
 
+### Sign-in
+
+The dashboard has a sign-in page with a 30-day session. Add passkeys under **Account** to sign in
+with Face ID, Touch ID or a security key (set `SNAG_PUBLIC_URL` to the address you sign in at).
+Scripts and the JSON API keep using HTTP Basic auth with the admin password.
+
+### Backups
+
+```bash
+docker compose exec -T snag /snag-server backup > snag-backup.tar.gz     # safe while running
+docker compose stop snag
+docker compose run --rm -v "$PWD:/b" snag restore /b/snag-backup.tar.gz
+docker compose start snag
+```
+
+A backup is every project, issue, report, attachment and symbol file. Restore into an empty data
+directory, `--replace` to set the current data aside, or `--merge` to add a project export (from
+a project's settings) to another server. Restores need the server stopped and are checked in a
+scratch directory first, so a bad archive changes nothing. `SNAG_BACKUP_DIR` writes one on a
+schedule, and the dashboard has a download button.
+
+### Storage
+
+Give projects an attachment limit (per project, or `SNAG_PROJECT_STORAGE_MB` for all). Past it,
+new reports are kept without their screenshots and recordings, and the issue says so.
+
+With `SNAG_S3_BUCKET`, screenshots, recordings and other binary attachments move to an
+S3-compatible bucket (AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS…) after they're
+received. Reports, issues and text attachments stay on disk, so search and symbolication stay
+fast. The dashboard serves files from the bucket (with ranges, so videos seek), exports include
+them, and deleting a report deletes them. Backups don't include the bucket's objects.
+
+### Metrics
+
+`GET /metrics` serves Prometheus metrics: reports received, HTTP requests by route and status,
+forwarding attempts, attachments dropped for storage, and gauges for issues by status, reports,
+storage per project and pending deliveries. Scrape it with `SNAG_METRICS_TOKEN` or the admin login.
+
 ### API
 
 | Endpoint | Auth | Purpose |
@@ -254,6 +402,11 @@ without a webhook or hourly with one.
 | `POST /api/v1/reports` | ingest key | Upload (multipart: `report` JSON plus `attachmentN` parts). |
 | `GET /api/v1/followup/{id}`, `POST …/messages` | per-report token | Status and thread for My Reports. |
 | `POST /api/v1/attest/challenge`, `/keys` | ingest key | App Attest. |
+| `GET /api/v1/board`, `POST /api/v1/board/{n}/vote` | ingest key | Ideas board for apps. |
+| `POST /api/v1/symbols` | symbol token | Upload a dSYM (zip or DWARF file) as the body. |
+| `POST /api/v1/inbound-email` | inbound secret | Reporters' email replies. |
+| `GET /sdk/snag.js` | none | The web SDK. |
+| `GET /metrics` | metrics token or admin | Prometheus metrics. |
 | `GET /api/v1/projects`, `…/{slug}/issues`, `…/issues/{n}` | admin | Read projects and issues. |
 | `POST /api/v1/projects/{slug}/issues/{n}/messages` | admin | Message reporters from scripts. |
 | `GET /api/v1/health` | none | Health check. |
@@ -265,15 +418,20 @@ else are served as downloads.
 ## Testing
 
 ```bash
-swift test                    # 68 tests: redaction, sinks, outbox, inbox, App Attest client, capture, crash reports
-cd Server && go test -race ./...   # 42 tests: ingest, tracker, forwarding, notifications, GitHub sync, App Attest
+swift test                    # 73 tests: redaction, sinks, outbox, inbox, breadcrumbs, board, App Attest client, capture, crash reports
+cd Server && go test -race ./...   # 61 tests: ingest, tracker, search, symbols, backups, email, board, sign-in, S3, metrics…
+node --test Server/internal/server/sdk/snag.test.mjs   # web SDK redaction and URL rules
+Scripts/check-strings.py      # string catalogs match the code, every language complete
 Scripts/live-test.sh          # Swift client against the real Docker image
 Scripts/ui-test.sh            # Example app UI tests against a local server (iOS or tvOS)
 ```
 
 The UI tests send reports from the example app to a real server. They check that private areas
 are black in the uploaded screenshot's pixels and in a frame decoded from the uploaded recording,
-and that a developer reply shows up in My Reports and the user's answer reaches the server.
+that a developer reply shows up in My Reports and the user's answer reaches the server, and that
+the breadcrumb trail arrives. They also open the form in German at the largest text size and run
+Xcode's accessibility audit. The S3 test runs against a real S3-compatible server when
+`SNAG_TEST_S3_ENDPOINT` and its keys are set (SeaweedFS in Docker works).
 
 ## Requirements
 
@@ -287,6 +445,11 @@ and that a developer reply shows up in My Reports and the user's answer reaches 
 - App Attest needs a real device; the server-side verification is tested with a synthetic
   certificate chain, not yet with a genuine Apple attestation.
 - MetricKit reports can't be produced in the simulator; the crash reporter is tested with payloads
-  generated by MetricKit.
+  generated by MetricKit, and server symbolication with a dSYM built in the tests' fixtures.
+- Swift function names come from DWARF, so they read `ContentView.load` without argument labels.
+- The web SDK's tab screenshot needs a browser with `getDisplayMedia` and a user click, so it
+  isn't covered by the automated tests and hasn't been tried in a real browser yet. Passkey
+  sign-in is tested with a software authenticator, not a real one.
+- Email replies are tested with sample Mailgun, Postmark and raw messages, not live accounts.
 - The server keeps everything in memory and on disk as files: comfortable for thousands of
   reports per project, not millions.

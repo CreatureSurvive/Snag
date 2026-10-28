@@ -15,3 +15,15 @@
   regression detection, forwarding to GitHub, Discord, Slack, webhooks and email, ntfy and
   Pushover notifications, two-way GitHub sync, in-app conversations and email replies with
   reporters, App Attest verification, and a Docker image.
+- **Breadcrumbs**: screens (`.snagScreen`, UIKit tracking), actions, sanitized requests through
+  `SnagNetworkObserver`, and app state, attached as `breadcrumbs.json` and shown as a timeline.
+- **Ideas**: `SnagBoard` and `SnagIdeasView` for the server's public ideas board, with votes.
+- **Languages**: SnagUI and SnagPostmortem in English, German, Spanish, French, Japanese,
+  Brazilian Portuguese and Simplified Chinese; accessibility fixes from Xcode's audit.
+- **Web SDK** at `/sdk/snag.js`: report form, redaction, console and activity capture, tab
+  screenshots with private elements hidden, offline queue; per-project web origins.
+- **snag-server** additions: server-side redaction, crash symbolication from uploaded dSYMs,
+  backup/restore/export and scheduled backups, email replies from reporters, the ideas board,
+  sign-in page with sessions and passkeys, search across words, phrases and logs (one project or
+  all), saved views, CSV export, keyboard shortcuts, Prometheus metrics, per-project storage
+  limits, and S3-compatible attachment storage.
