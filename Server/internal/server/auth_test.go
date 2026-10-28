@@ -133,7 +133,7 @@ func TestPasskeyRegistrationAndSignIn(t *testing.T) {
 		t.Fatal("registration without signing in")
 	}
 	var opts struct {
-		Challenge string `json:"challenge"`
+		Challenge string              `json:"challenge"`
 		RP        struct{ ID string } `json:"rp"`
 	}
 	_ = json.Unmarshal(jsonPost("/account/passkeys/begin", nil, true).Body.Bytes(), &opts)
